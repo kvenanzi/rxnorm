@@ -1,0 +1,44 @@
+[project]
+name = "rxnorm-vandf"
+version = "0.1.0"
+requires-python = ">=3.12"
+# Lower bounds are deliberately loose so `pip install -e .` on Colab keeps its
+# preinstalled numpy/pandas/torch; uv.lock pins exact versions for local runs.
+dependencies = [
+    "accelerate>=1.0",
+    "datasets>=3.0",
+    "duckdb>=1.1",
+    "matplotlib>=3.11.2",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=15",
+    "pyyaml>=6.0.3",
+    "scikit-learn>=1.4",
+    "sentence-transformers>=3.0",
+    "torch>=2.4",
+    "wandb>=0.19",
+    "wandb-workspaces>=0.4.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rxnorm_vandf"]
+
+# Local GPU is a GTX 1070 (Pascal, sm_61). PyTorch's cu126 wheels still include
+# Pascal kernels; the newer cu128+ wheels dropped them. Colab ignores this block
+# (pip doesn't read tool.uv) and keeps its preinstalled torch.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

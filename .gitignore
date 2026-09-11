@@ -1,0 +1,17 @@
+# RxNorm release files: large, and several bundled sources are license-restricted.
+# Only derived VANDF/RXNORM data (both restriction level 0) may leave this machine.
+data/
+*.duckdb
+*.duckdb.wal
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Experiment tracking and training outputs
+wandb/
+outputs/
+models/
+artifacts/

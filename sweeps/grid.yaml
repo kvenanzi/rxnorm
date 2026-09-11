@@ -1,0 +1,23 @@
+# W&B Sweep: every combination of encoder x hard-negative strategy x strength
+# normalizer, 18 runs. Register with `uv run scripts/08_sweep.py --create`, then
+# run agents (Colab: notebooks/02_sweep.ipynb; local: 08_sweep.py --agent <id>).
+method: grid
+metric:
+  name: val/acc@1
+  goal: maximize
+parameters:
+  base_model:
+    values:
+      - sentence-transformers/all-MiniLM-L6-v2          # 22M params, general English
+      - BAAI/bge-small-en-v1.5                          # 33M, stronger general retriever
+      - cambridgeltl/SapBERT-from-PubMedBERT-fulltext   # 110M, trained to link UMLS synonyms
+  negatives:
+    values: [ingredient, tfidf, none]
+  normalize_strength:
+    values: [false, true]
+  epochs:
+    value: 4
+  batch_size:
+    value: 64
+  lr:
+    value: 2.0e-5
