@@ -21,7 +21,7 @@ SWEEP_ID = "idhaaw5i"
 NEGATIVES_SWEEP_ID = "uukeyzw7"   # sweeps/negatives_by_split.yaml: hard negatives x six splits
 
 # The follow-up experiment (docs/post-2): filled in once each sweep is registered.
-LEVERS_SWEEP_ID = "j1zdu28j"              # sweeps/levers.yaml: MTHSPL data x strength head x six splits x two seeds
+LEVERS_SWEEP_ID = "nypttmi8"              # sweeps/levers.yaml (aux_weight 0.01); j1zdu28j was registered at 0.2 and never run
 LEVERS_CONTROL_SWEEP_IDS = {"steps": "2exoct4h", "size": "ocmpf5na"}   # sweeps/levers_control_*.yaml
 KFOLD_GROUP = "kfold-k7"          # scripts/14_kfold.py: seven folds by ingredient + the all-data model
 

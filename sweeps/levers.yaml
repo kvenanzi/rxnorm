@@ -31,7 +31,8 @@ parameters:
   aux:
     values: [none, strength]
   aux_weight:
-    value: 0.2
+    value: 0.01                       # pilot on v1 (W&B group levers-pilot): 0.5 / 0.2 / 0.05 / 0.01 gave
+                                      # val acc@1 0.850 / 0.864 / 0.874 / 0.880 against 0.882 with no head
   seed:
     values: [42, 1]
   epochs:

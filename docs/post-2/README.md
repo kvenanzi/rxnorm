@@ -32,7 +32,7 @@ Written before any of the 48 runs had been started; the pilot in Appendix A chos
 
 - `03_build_dataset.py --sources VANDF,MTHSPL` unions the MTHSPL `DP` atoms (the NLM-generated `MTH_RXN_DP` duplicates are excluded, as `MTH_RXN_CD` was for the VA) into the input table with a `source` column; the pairs, candidates, and split logic are otherwise unchanged, and the six folders under `data/multi/` reproduce the VA rows of `data/splits/` exactly. Unmatched strings are kept per source.
 - `train_sources` selects which sources' train rows feed the triplets; every run evaluates the VA val/test of its split under the usual keys and the MTHSPL val/test rows under `val_mthspl` / `test_mthspl`, so the VA-only arm reports MTHSPL transfer for free.
-- `aux=strength` adds an integer label column and swaps the loss for `MNRLWithStrengthHead` (`rxnorm_vandf/losses.py`): the contrastive loss on the same batches, plus `aux_weight` × cross-entropy of a linear head on the anchor embedding. The head's initialization is seeded separately so the two arms of a seed see identical batches.
+- `aux=strength` adds an integer label column and swaps the loss for `MNRLWithStrengthHead` (`rxnorm_vandf/losses.py`): the contrastive loss on the same batches, plus `aux_weight` × cross-entropy of a linear head on the anchor embedding. The head's initialization is seeded separately so the two arms of a seed see identical batches. `aux_weight` = 0.01, chosen on validation in the pilot of Appendix A from {0.01, 0.05, 0.2, 0.5}.
 - `03_build_dataset.py --kfold 7 --fold i` and `--all-train` draw the fold folders; `14_kfold.py` runs them, pools each fold's logged predictions (`predictions.parquet`, top-20 per string), fits the calibration on the pool, and reports leave-one-fold-out threshold transfer.
 - Hyper-parameters are those of the first write-up throughout (4 epochs, batch 64, lr 2e-5, seed 42 and 1). Epochs are not rescaled for the larger MTHSPL arm; the control sweep covers that.
 
@@ -46,12 +46,22 @@ Written before any of the 48 runs had been started; the pilot in Appendix A chos
 
 ## 6. Reproduction
 
-Everything runs from the commands in the repository README under "The follow-up". Sweeps `j1zdu28j` (main), `2exoct4h` (steps control), `ocmpf5na` (size control); W&B group `kfold-k7`; artifacts `vandf-rxnorm-multi:v0` and `vandf-rxnorm-kfold:v0` for the data, `vandf-rxnorm-predictions` per fold, `vandf-rxnorm-biencoder-final-all` for the all-data model. The published `vandf-rxnorm-pairs`, `vandf-rxnorm-splits`, and `vandf-rxnorm-biencoder` artifacts are untouched.
+Everything runs from the commands in the repository README under "The follow-up". Sweeps `nypttmi8` (main; `j1zdu28j` was registered with the pilot's 0.2 weight and never run), `2exoct4h` (steps control), `ocmpf5na` (size control); W&B group `kfold-k7`; artifacts `vandf-rxnorm-multi:v0` and `vandf-rxnorm-kfold:v0` for the data, `vandf-rxnorm-predictions` per fold, `vandf-rxnorm-biencoder-final-all` for the all-data model. The published `vandf-rxnorm-pairs`, `vandf-rxnorm-splits`, and `vandf-rxnorm-biencoder` artifacts are untouched.
 
 ## Appendix A: Experiment log
 
 - **Tooling** (2026-09-14, branch `levers`). Multi-source pairs, the strength-head loss, k-fold folders, predictions artifacts, the `--log-model` / `--model-artifact` switches; 19 new unit tests. The default dataset build emits byte-identical SQL. Local smoke runs of every new path on the GTX 1070.
-- **Pilot** (2026-09-14, W&B group `levers-pilot`, GTX 1070, split v1, seed 42, VA strings only). `aux_weight` 0.2 against 0.5, selected on validation acc@1. *Result to be filled in.*
+- **Pilot** (2026-09-14, W&B group `levers-pilot`, GTX 1070, split v1, seed 42, VA strings only, everything else the published recipe; the reference is the split-v1 run of the first write-up's §5.8, `lqf7dett`, same machine). The head's cross-entropy over 232 classes starts near 4 against a contrastive loss near 0.05, so the weight decides whether the head is a regularizer or the objective. Four weights, selected on validation acc@1:
+
+  | head weight | run | val acc@1 | test acc@1 | strength | ingredient | dose form | best epoch |
+  |---|---|---|---|---|---|---|---|
+  | none (reference) | `lqf7dett` | 0.882 | 0.931 | 0.961 | 0.983 | 0.972 | – |
+  | 0.01 | `tiotc7iy` | 0.880 | 0.928 | 0.963 | 0.985 | 0.970 | 3 |
+  | 0.05 | `9zw6jvov` | 0.874 | 0.923 | 0.962 | 0.983 | 0.969 | 1 |
+  | 0.2 | `0usjnp44` | 0.864 | 0.904 | 0.963 | 0.975 | 0.964 | 2 |
+  | 0.5 | `spja8f8i` | 0.850 | 0.890 | 0.957 | 0.973 | 0.956 | 1 |
+
+  A monotone dose-response: the heavier the head, the lower the validation accuracy, the earlier the best epoch, and the more ingredient and dose-form accuracy give way, while strength accuracy never moves. The grid uses 0.01, the largest weight that is not already worse than no head on one split; H2 is tested at that weight. The pilot was run on the published split and is not part of the paired analysis.
 
 ## Appendix B: Decisions
 
