@@ -2,9 +2,9 @@
 
 | created | modified | status | confidence | importance |
 |---|---|---|---|---|
-| 2026-09-11 | 2026-09-13 | finished | likely[^conf] | 4 |
+| 2026-09-11 | 2026-09-14 | finished | likely[^conf] | 4 |
 
-> **Abstract.** Medication normalization tools reliably map a raw drug string to its RxNorm *ingredient* (RxMap, [Korpela et al 2026](#references), reports F1 ≈ 0.97), but the code a pharmacy or interaction checker needs is the *clinical drug*: ingredient, strength, and dose form resolved together. I ask how far a small retrieval model gets at that level, using a labeled dataset that costs nothing to build: the VA National Drug File (VANDF) is a source vocabulary inside RxNorm, so every VA name that shares a concept identifier with an RxNorm clinical drug is, by NLM's own curation, the same drug. From the 2026-09-08 release I extract 14,372 (VA string, SCD/SBD) pairs over 8,315 targets and a 27,287-candidate pool, split *by ingredient* so the test set contains only drugs whose ingredients were never seen in training. Exact string match scores 0; TF-IDF character n-grams reach acc@1 0.509; a MiniLM bi-encoder fine-tuned with a contrastive loss and ingredient-matched hard negatives reaches 0.836; a 40-line rule that pre-computes RxNorm-style concentrations adds 5 points (0.886); and an 18-run grid shows domain pre-training (SapBERT) is worth a further +8.6 points of validation accuracy, more than either of the other factors. The final model scores **acc@1 0.931 (95% CI 0.918–0.941), recall@5 0.984** on test. Because a 7% error rate is not deployable without review, I calibrate a confidence score and choose thresholds on validation only: 79% of answerable strings can be auto-accepted at 98.8% precision, or 46% at 98.2% once real drugs with no clinical-drug concept are included. Remaining errors split evenly across strength, dose form, ingredient, and brand-versus-generic twins, and a share of the strength errors are underdetermined by the input string. Limitations: one training seed, one split, VA strings only, and a 5-point validation–test gap that says the ingredient draw matters more than the sampling error suggests. Code, data, model, and every run are public.
+> **Abstract.** Medication normalization tools reliably map a raw drug string to its RxNorm *ingredient* (RxMap, [Korpela et al 2026](#references), reports F1 ≈ 0.97), but the code a pharmacy or interaction checker needs is the *clinical drug*: ingredient, strength, and dose form resolved together. I ask how far a small retrieval model gets at that level, using a labeled dataset that costs nothing to build: the VA National Drug File (VANDF) is a source vocabulary inside RxNorm, so every VA name that shares a concept identifier with an RxNorm clinical drug is, by NLM's own curation, the same drug. From the 2026-09-08 release I extract 14,372 (VA string, SCD/SBD) pairs over 8,315 targets and a 27,287-candidate pool, split *by ingredient* so the test set contains only drugs whose ingredients were never seen in training. Exact string match scores 0; TF-IDF character n-grams reach acc@1 0.509; a MiniLM bi-encoder fine-tuned with a contrastive loss and ingredient-matched hard negatives reaches 0.836; a 40-line rule that pre-computes RxNorm-style concentrations adds 5 points (0.886); and an 18-run grid shows domain pre-training (SapBERT) is worth a further +8.6 points of validation accuracy, more than either of the other factors. The final model scores **acc@1 0.931 (95% CI 0.918–0.941), recall@5 0.984** on the published test split; re-drawing the ingredient split five more times and retraining puts the same recipe at **0.907 ± 0.019** (range 0.874–0.931), with the published draw the most favorable of the six and training-seed noise at 0.001. Because a 7% error rate is not deployable without review, I calibrate a confidence score and choose thresholds on validation only: 79% of answerable strings can be auto-accepted at 98.8% precision, or 46% at 98.2% once real drugs with no clinical-drug concept are included. Remaining errors split evenly across strength, dose form, ingredient, and brand-versus-generic twins, and a share of the strength errors are underdetermined by the input string. Limitations: VA strings only; a headline that should be read as a band of about two points rather than a point estimate, because the ingredient draw moves it by two to three times the sampling error; and calibration thresholds fit on one split. Code, data, model, and every run are public.
 
 ## 1. Background
 
@@ -79,7 +79,7 @@ Two VA strings map to more than one concept (an albuterol inhaler with three NDA
 
 ### 3.3 Precision of the estimates
 
-With n = 1,848 test strings, a Wilson 95% interval ([Wilson 1927](#references)) at 93% accuracy is about ±1.2 points; at 51% it is ±2.3. Those intervals describe sampling error *given this split*. They do not capture the variance from which ingredients landed where, and §5 shows that source is larger: validation (n = 1,907) is harder than test for every method tried, by 4 to 6 points. I report both throughout and treat the pair as the honest range.
+With n = 1,848 test strings, a Wilson 95% interval ([Wilson 1927](#references)) at 93% accuracy is about ±1.2 points; at 51% it is ±2.3. Those intervals describe sampling error *given this split*. They do not capture the variance from which ingredients landed where, and §5.8 measures that source directly: across six draws of the split the final model's test acc@1 has a standard deviation of 0.019, about 2.5 times the 0.007 that sampling alone predicts. On this split, validation (n = 1,907) is harder than test for every method tried, by 4 to 6 points; §5.8 shows that ordering is a property of the draw, not of the task, and flips on half of the re-draws. I report both throughout.
 
 ### 3.4 What the hard cases look like
 
@@ -223,7 +223,7 @@ Mean validation acc@1 by factor level:
 
 *Figure 2. Mean validation acc@1 per factor level across the 18-run grid. Data: `figures/data.json`.*
 
-The effects are roughly additive, and the best cell is best on every axis, so there is no interesting interaction to report. On H5: the encoder dominates, and the direction is instructive. `bge-small` is newer and scores higher than MiniLM on general retrieval benchmarks, yet the two are indistinguishable here; SapBERT, which is older and not a general-purpose embedder at all, wins by a wide margin because its pre-training objective (UMLS synonym alignment) is almost this task. Two cautions. Each cell is one seed, and the replication in §5.2 suggests run-to-run noise around ±0.5 point on test; the encoder effect is far outside that, the negatives effect is not comfortably so. And the normalizer's contribution shrinks with SapBERT (+4.0 on its best cell vs +5.6 for MiniLM), consistent with a stronger encoder having absorbed some of the conversions.
+The effects are roughly additive, and the best cell is best on every axis, so there is no interesting interaction to report. On H5: the encoder dominates, and the direction is instructive. `bge-small` is newer and scores higher than MiniLM on general retrieval benchmarks, yet the two are indistinguishable here; SapBERT, which is older and not a general-purpose embedder at all, wins by a wide margin because its pre-training objective (UMLS synonym alignment) is almost this task. Two cautions. Each cell is one seed on one split. §5.8 puts training-seed noise at 0.001 on the same hardware (the ±0.5 point in §5.2 was the GPU and library stack), but the split itself moves test acc@1 by about 0.02 between draws; the encoder effect is far outside that, the normalizer effect comfortably so, and the +3.0 negatives effect is not. And the normalizer's contribution shrinks with SapBERT (+4.0 on its best cell vs +5.6 for MiniLM), consistent with a stronger encoder having absorbed some of the conversions.
 
 ### 5.5 Final model
 
@@ -237,7 +237,7 @@ The winning configuration retrained locally with an artifact (run `sapbert-ingre
 | MiniLM + normalizer | 0.886 | 0.871–0.900 | 0.975 | 0.982 | 0.941 | 0.943 |
 | **SapBERT + ingredient negatives + normalizer** | **0.931** | **0.918–0.941** | **0.984** | 0.983 | 0.961 | 0.972 |
 
-Test, n = 1,848 held-out-ingredient strings; Wilson intervals. Validation acc@1 for the final model is 0.883 (0.868–0.897, n = 1,907); the truth for new VA drugs lies somewhere in the band between the two. The public inference wrapper (`rxnorm_vandf.infer.Mapper`) reproduces 0.931 through the published code path.
+Test, n = 1,848 held-out-ingredient strings; Wilson intervals. Validation acc@1 for the final model is 0.883 (0.868–0.897, n = 1,907). The Wilson interval is the sampling error on this draw; §5.8 shows the draw itself is the larger source, and that 0.931 is the top of a six-split range whose mean is 0.907. The public inference wrapper (`rxnorm_vandf.infer.Mapper`) reproduces 0.931 through the published code path.
 
 ### 5.6 Calibration and abstention (H6)
 
@@ -278,6 +278,37 @@ Two things H6 did not anticipate. First, the 99% validation target landed at 98.
 
 TF-IDF's errors were three-quarters strength. The final model's are an even spread: 46 involve strength, 43 dose form, 31 ingredient, and 25 are cases where every component is right but the concept is not, almost always a branded product and its generic with names identical apart from the brand. Ingredient errors did not move between MiniLM and the final model (31 and 31), and top-1 ingredient accuracy is 0.983 for both; whatever is left there is not a matter of encoder. A good share of the strength errors are the underdetermined strings of §3.4: `MANNITOL 250MG/ML INJ` maps to `50 ML mannitol 250 MG/ML Injection` and the volume is not in the input. No model reads that from the string; the right behavior is to abstain, and the calibrated confidence mostly does.
 
+### 5.8 Split and seed variance
+
+Every number above comes from one ingredient hash and one training seed. To measure what that hides, I re-drew the split with five more salts (v2–v6; same 70/15/15 rule by ingredient, same `mixed` exclusion) and retrained the final configuration on each with seed 42, then repeated the published split (v1) with training seeds 1 and 2. Eight runs on the GTX 1070, about 20 minutes each, W&B group `split-seeds`, no model artifacts. The v1 × seed 42 run reproduced the published run to the third decimal (0.931 / 0.984), which is the pipeline check. TF-IDF was scored on the same six splits as a model-free measure of how hard each draw is. Because the split is by ingredient and a few ingredients carry dozens of products, the draws differ in size by hundreds of pairs.
+
+| Split | Pairs train / val / test / mixed | val acc@1 | test acc@1 | val − test | test recall@5 | TF-IDF test acc@1 |
+|---|---|---|---|---|---|---|
+| v1 (published) | 9,290 / 1,907 / 1,848 / 1,327 | 0.881 | **0.931** | −0.049 | 0.984 | 0.509 |
+| v2 | 9,562 / 1,808 / 1,752 / 1,250 | 0.913 | 0.905 | +0.007 | 0.974 | 0.475 |
+| v3 | 9,687 / 1,824 / 1,707 / 1,154 | 0.919 | 0.905 | +0.014 | 0.979 | 0.555 |
+| v4 | 9,084 / 1,592 / 2,373 / 1,323 | 0.908 | 0.874 | +0.034 | 0.981 | 0.477 |
+| v5 | 9,213 / 1,945 / 1,742 / 1,472 | 0.895 | 0.921 | −0.026 | 0.985 | 0.490 |
+| v6 | 9,446 / 1,674 / 1,908 / 1,344 | 0.884 | 0.910 | −0.026 | 0.988 | 0.480 |
+| **mean ± sd (6 splits)** | | 0.900 ± 0.015 | **0.907 ± 0.019** | −0.007 ± 0.031 | 0.982 ± 0.005 | 0.498 ± 0.031 |
+| v1, seed 1 | as v1 | 0.881 | 0.930 | −0.049 | 0.984 | – |
+| v1, seed 2 | as v1 | 0.880 | 0.932 | −0.052 | 0.984 | – |
+
+![Val and test acc@1 per split, with the seed repeats](figures/split_seeds.png)
+
+*Figure 5. The final recipe on six ingredient draws (left) and TF-IDF on the same draws (right). Filled markers are seed 42; hollow markers on the v1 row are seeds 1 and 2. The band is the mean ± sd of test acc@1 over the six splits. Data: `figures/data.json`; runs in W&B group `split-seeds`.*
+
+Four things follow.
+
+- **The split is the dominant noise, and the published draw is a favorable one.** Test acc@1 over six draws is 0.907 ± 0.019, range 0.874–0.931, and v1 is the best of the six. Binomial sampling at n ≈ 1,850 predicts a spread of 0.007; the remaining 0.018 is the ingredient draw itself. A standard deviation estimated from six draws is only known to within a factor of about 0.6 to 2.5, so the honest statement is "about two points", not 0.019. The headline for this recipe is 0.91 ± 0.02 on unseen ingredients, and the 0.931 in §5.5 should be read as the top of that band.
+- **The training seed does not matter.** Seeds 1, 2, and 42 on the published split give 0.930, 0.931, and 0.932 on test and 0.880–0.881 on validation. The half-point difference between the local and Colab replications in §5.2 was the hardware and library stack, not the seed.
+- **"Validation is the harder draw" was an accident of v1.** The val − test gap runs −0.049, +0.007, +0.014, +0.034, −0.026, −0.026 across the six splits: mean −0.007, standard deviation 0.031, sign split three to three. §3.3's observation that every method scored lower on validation than on test described this split, not the task. It also means the per-epoch model selection on validation was selecting on a harder set than it was reporting on, which is the conservative direction.
+- **What does not move.** Recall@5 stays within 0.974–0.988, ingredient accuracy within 0.980–0.994, strength within 0.951–0.967, and dose form within 0.954–0.974 across all six draws. The operational claims in §6.3 rest on recall@5 and on calibration; recall@5 is the stable quantity. Calibration was not re-run per split, so the thresholds in §5.6 remain a v1 result.
+
+TF-IDF's difficulty ordering is not the model's: its split-to-split standard deviation is 0.031, and its test accuracy correlates only weakly with SapBERT's across the six draws (r = 0.23; v3 is TF-IDF's easiest split and the model's joint hardest). What is hard for a string matcher (unusual notation) and what is hard for the fine-tuned model (product-rich ingredient families full of twins) are different things. The hardest draw for the model, v4, also happens to be the largest test set, 2,373 pairs, which is what a by-ingredient split does when a few product-rich ingredients land in test.
+
+The sweep's factor effects (§5.4) were measured on v1 only. The encoder (+8.6) and normalizer (+4.8) effects are several times the two-point split noise; the hard-negatives effect (+3.0) is about one and a half times it, and a second split would be needed to call it settled.
+
 ## 6. Discussion
 
 ### 6.1 Verdicts
@@ -291,11 +322,11 @@ TF-IDF's errors were three-quarters strength. The final model's are an even spre
 | H5 | one factor dominates | encoder, +8.6, nearly twice the normalizer and nearly three times negatives |
 | H6 | calibrated score allows meaningful auto-acceptance; drops with unanswerable strings | 79% at 98.8%; 46% at 98.2% |
 
-The one conclusion I would carry to another project is H4's: when a model's failures are deterministic, write the rule and let the model do what it is good at, which is matching strings. The second is H5's: a domain-aligned pre-training objective mattered more than parameter count or benchmark recency, and it is cheap to check, since SapBERT trains in two minutes on a T4.
+None of the hypotheses concerned the split, and the experiment that tested it (§5.8) changed the headline more than any of them: the same recipe scores 0.874 to 0.931 depending on which ingredients are held out. The one conclusion I would carry to another project is H4's: when a model's failures are deterministic, write the rule and let the model do what it is good at, which is matching strings. The second is H5's: a domain-aligned pre-training objective mattered more than parameter count or benchmark recency, and it is cheap to check, since SapBERT trains in two minutes on a T4.
 
 ### 6.2 Threats to validity
 
-- **One seed, one split.** Every number above is a single training run on a single ingredient hash. The Colab replication bounds GPU noise at about half a point; it says nothing about split variance, and the 4–6 point val/test gap for every method says that variance is real. A second hash seed, or k-fold by ingredient, is the obvious next experiment and the one I would run first.
+- **Six splits, not sixty.** The final recipe was retrained on six ingredient draws (§5.8); the baselines, the sweep, and the calibration were run on one. Six draws pin the split standard deviation to a factor of about two, so "0.907 ± 0.019" is a band, not a measurement of the band's width. The sweep's smallest effect (hard negatives, +3.0) is the one that a second split could plausibly overturn. Training-seed noise is measured and negligible.
 - **VA strings only.** Training and evaluation are on one institution's naming conventions. Another hospital's formulary is a different distribution, and generalization to it is unmeasured. The held-out-ingredient split guards against memorizing drugs, not against memorizing the VA's abbreviation habits.
 - **Not comparable to RxMap.** RxMap's numbers are on MEPS strings at the ingredient level; mine are on VA strings at the clinical-drug level. The framing in §1.2 is that these are different tasks, not that one system beats the other.
 - **Threshold transfer.** The 99% target reached 98.2–98.8% on test. Anyone deploying a threshold should re-choose it on their own held-out data and expect a similar shortfall.
@@ -304,7 +335,7 @@ The one conclusion I would carry to another project is H4's: when a model's fail
 
 ### 6.3 What this supports operationally
 
-- As a **suggestion tool** for a human mapper: yes. Top-five recall of 98.4% means the reviewer almost never searches RxNorm by hand.
+- As a **suggestion tool** for a human mapper: yes. Top-five recall of 97.4–98.8% across six splits means the reviewer almost never searches RxNorm by hand.
 - As an **auto-mapper with review**: a policy decision, not a technical one. Between roughly half and three-quarters of a VA-style file can be accepted at about 98% precision, depending on how much of the file has no answer. Whether 2% wrong is acceptable depends on what is downstream.
 - **Fully automatic**: no.
 
@@ -314,7 +345,7 @@ The first model trains in 5 minutes on a 2016 consumer GPU and 91 seconds on a f
 
 ## 7. Further work
 
-1. A second split seed, then k-fold by ingredient, to put an interval on the split variance that §3.3 cannot.
+1. The sweep and the calibration on a second split, and a k-fold by ingredient for the final recipe, to tighten the two-point band in §5.8 and to test whether the +3.0 hard-negatives effect survives a re-draw.
 2. The 1,327 `mixed` combination-drug pairs as a "partially seen ingredients" evaluation.
 3. Auxiliary ingredient / strength / dose-form heads. Deferred because the taxonomy already comes from the retrieved candidate's labels; they might still help as a training signal.
 4. Cross-institution transfer: fine-tune on VA, evaluate on another source vocabulary's names that share RXCUIs (the same trick that built this dataset works for any RxNorm source).
@@ -322,14 +353,14 @@ The first model trains in 5 minutes on a 2016 consumer GPU and 91 seconds on a f
 
 ## 8. Reproduction
 
-- **Code and data preparation:** [github.com/kvenanzi/rxnorm](https://github.com/kvenanzi/rxnorm). Eleven numbered scripts take the RxNorm release to a trained, calibrated, published model; primers cover the [RxNorm data model](../rxnorm-primer.md), [training](../training-primer.md), and [calibration and sweeps](../calibration-and-sweeps.md).
+- **Code and data preparation:** [github.com/kvenanzi/rxnorm](https://github.com/kvenanzi/rxnorm). Twelve numbered scripts take the RxNorm release to a trained, calibrated, published model and the split-variance runs; primers cover the [RxNorm data model](../rxnorm-primer.md), [training](../training-primer.md), and [calibration and sweeps](../calibration-and-sweeps.md).
 - **Model:** [kvenanzi/vandf-rxnorm-biencoder](https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder), with the calibration layer (four numbers in `calibration.json`, no pickle) and the candidate pool. `Mapper.from_pretrained(...)` gives string in, RXCUI and confidence out.
 - **Dataset:** [kvenanzi/vandf-rxnorm-pairs](https://huggingface.co/datasets/kvenanzi/vandf-rxnorm-pairs). Derived only from the two unrestricted RxNorm sources; no UTS account is needed to reproduce the numbers.
 - **Every run:** the W&B project [kettle-labs/rxnorm-vandf](https://wandb.ai/kettle-labs/rxnorm-vandf) holds the story runs, the sweep, and the calibration runs. The [W&B Report](https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA) presents them with live panels: run comparison, validation accuracy by epoch, the sweep's parallel coordinates, and the precision-versus-coverage curves.
 
 ## Appendix A: Experiment log
 
-All work was done 2026-09-11 against the 2026-09-08 release, in the order below. Run identifiers are W&B run IDs in `kettle-labs/rxnorm-vandf`.
+All work was done 2026-09-11 against the 2026-09-08 release, in the order below, except the split-variance runs of 2026-09-14. Run identifiers are W&B run IDs in `kettle-labs/rxnorm-vandf`.
 
 - **Load.** Four RRF tables into DuckDB with row counts matching file line counts. Two parsing gotchas: `TRAILING` is a reserved word (the trailing-pipe column is `TRAILING_PIPE`), and both `quote=''` and `escape=''` are required or quote characters in drug names break the parse.
 - **Checkpoint.** 53,195 active VANDF atoms; 17,964 land on an SCD/SBD; 8,315 distinct targets; 27,287 active SCD/SBD in RxNorm. By term type: CD → 8,458 SCD + 313 SBD; AB → 8,333 SCD + 297 SBD. About half of CD/AB atoms have no SCD/SBD.
@@ -342,6 +373,7 @@ All work was done 2026-09-11 against the 2026-09-08 release, in the order below.
 - **Final model** (`0d9ntjls`). SapBERT + ingredient negatives + normalizer, GTX 1070, 19.5 minutes, train loss 0.034. Test 0.931 / 0.984; val 0.883 / 0.961. Artifact `:v3`. Calibrated (temperature 0.042): table in §5.6.
 - **Inference wrapper.** `Mapper` reproduces 0.931 through the public path; at the shipped threshold 0.922 it accepts 55.5% of matched test strings at 99.2% precision. Unit tests cover a hit, a supply (abstain), and the hyoscyamine elixir (wrong top-1 at 0.77, routed to review, truth listed second).
 - **Taxonomy correction.** An earlier reading of the final model's errors as "over half strength" was the MiniLM mix; the recomputed split is 46 / 43 / 31 / 25 of 128, as in §5.7.
+- **Split and seed variance** (2026-09-14, `12_split_seeds.py`). Five more salts (`rxnorm-2026-09-08-v2` … `-v6`) built into `data/splits/` without touching `data/processed`; the final recipe on each at seed 42 (`lqf7dett` v1, `0c2jqaf1` v2, `i5pj0dbc` v3, `aa7hcyap` v4, `r3asp4in` v5, `kflhpyjx` v6) plus v1 at seeds 1 and 2 (`0x22n7cb`, `zuj9ec29`), GTX 1070, about 20 minutes each, no model artifacts. Test acc@1 0.931 / 0.905 / 0.905 / 0.874 / 0.921 / 0.910; seeds 0.930 / 0.932. Table in §5.8. Splits also logged as artifact `vandf-rxnorm-splits:v0` for Colab (`notebooks/03_split_seeds.ipynb`); `vandf-rxnorm-pairs` unchanged at `v0`. Rebuilding the dataset also exposed a pre-existing nondeterminism, the order of strengths inside the label of about 20 combination vaccines, fixed with extra sort keys; splits and every other column were identical.
 
 ## Appendix B: Decisions
 
@@ -372,6 +404,9 @@ All work was done 2026-09-11 against the 2026-09-08 release, in the order below.
 | Each model directory carries `train_config.json` | Inference must preprocess exactly as training did |
 | Calibration ships as `calibration.json`, reimplemented in `infer.py` | No sklearn pickle in a public model repo; the layer is four numbers |
 | Weights Apache-2.0; dataset `license: other` with the NLM license linked | SapBERT is Apache-2.0; UMLS category 0 is not an SPDX license |
+| Split-variance runs log no model artifact; new splits live under a separate artifact name | Eight more 0.4 GB checkpoints for nothing; re-logging `vandf-rxnorm-pairs` would move `:latest` off the published split for every Colab run |
+| The published split is re-run inside the variance batch rather than reused | The published run was the sweep's selection cell and ran on different hardware; a same-batch repeat is the fair comparison, and it doubles as the pipeline check |
+| The dataset builder refuses a new salt into `data/processed` | Every model, figure, and test reads that folder; a silent re-draw there would change every downstream number |
 
 ## References
 
@@ -402,6 +437,6 @@ All work was done 2026-09-11 against the 2026-09-08 release, in the order below.
 
 [^forty]: From NLM's [RxNorm Overview](https://www.nlm.nih.gov/research/umls/rxnorm/overview.html): "About 60% of the drug names from RxNorm source vocabularies receive RxNorm normalized names. The other 40% of source vocabulary drug names do not receive RxNorm normalized names because they are either out-of-scope or their names are too ambiguous. The most common types of names that are not assigned RxNorm normalized names are medical devices, foods, and enzymes." In this dataset, 17,564 of the 31,936 distinct active VA CD/AB strings (55%) have no SCD/SBD; the VA file runs heavier on supplies and nutrition than NLM's average source.
 
-[^conf]: Status and confidence tags follow the gwern.net convention; the confidence word is from the Kesselman (2008) scale of verbal probabilities. "Likely" here means I expect the main effects (encoder > normalizer > negatives; calibration enabling roughly half to three-quarters auto-acceptance at about 98%) to hold under a second split seed, but not the third decimal of any number.
+[^conf]: Status and confidence tags follow the gwern.net convention; the confidence word is from the Kesselman (2008) scale of verbal probabilities. "Likely" here means I expect the main effects (encoder > normalizer > negatives; calibration enabling roughly half to three-quarters auto-acceptance at about 98%) to hold under a second split seed, but not the third decimal of any number. After §5.8 the headline is the third decimal's worst case: the final recipe moved 2.4 points on average when the split was re-drawn, while its recall@5 and component accuracies barely moved. The factor ordering itself was not re-run per split.
 
 [^first]: This was my first trained model and my first use of an experiment tracker, which is one reason the protocol (validation picks, test reported once, thresholds chosen off-test) is spelled out at a level a practitioner would take for granted.
