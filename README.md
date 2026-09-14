@@ -36,7 +36,8 @@ for p in mapper.map(["METOPROLOL TARTRATE 12.5MG TAB", "CATHETER,FOLEY SILICONE 
 
 Model: [kvenanzi/vandf-rxnorm-biencoder](https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder) ·
 Dataset: [kvenanzi/vandf-rxnorm-pairs](https://huggingface.co/datasets/kvenanzi/vandf-rxnorm-pairs) ·
-Runs and Report: [wandb.ai/kettle-labs/rxnorm-vandf](https://wandb.ai/kettle-labs/rxnorm-vandf)
+Runs: [wandb.ai/kettle-labs/rxnorm-vandf](https://wandb.ai/kettle-labs/rxnorm-vandf) ·
+Report: [live panels](https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA)
 
 ## Documentation
 
