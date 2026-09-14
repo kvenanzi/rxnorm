@@ -4,7 +4,7 @@
 |---|---|---|---|---|
 | 2026-09-11 | 2026-09-14 | finished | likely[^conf] | 4 |
 
-> **Abstract.** Medication normalization tools reliably map a raw drug string to its RxNorm *ingredient* (RxMap, [Korpela et al 2026](#references), reports F1 ≈ 0.97), but the code a pharmacy or interaction checker needs is the *clinical drug*: ingredient, strength, and dose form resolved together. I ask how far a small retrieval model gets at that level, using a labeled dataset that costs nothing to build: the VA National Drug File (VANDF) is a source vocabulary inside RxNorm, so every VA name that shares a concept identifier with an RxNorm clinical drug is, by NLM's own curation, the same drug. From the 2026-09-08 release I extract 14,372 (VA string, SCD/SBD) pairs over 8,315 targets and a 27,287-candidate pool, split *by ingredient* so the test set contains only drugs whose ingredients were never seen in training. Exact string match scores 0; TF-IDF character n-grams reach acc@1 0.509; a MiniLM bi-encoder fine-tuned with a contrastive loss and ingredient-matched hard negatives reaches 0.836; a 40-line rule that pre-computes RxNorm-style concentrations adds 5 points (0.886); and an 18-run grid shows domain pre-training (SapBERT) is worth a further +8.6 points of validation accuracy, more than either of the other factors. The final model scores **acc@1 0.931 (95% CI 0.918–0.941), recall@5 0.984** on the published test split; re-drawing the ingredient split five more times and retraining puts the same recipe at **0.907 ± 0.019** (range 0.874–0.931), with the published draw the most favorable of the six and training-seed noise at 0.001. Because a 7% error rate is not deployable without review, I calibrate a confidence score and choose thresholds on validation only: 79% of answerable strings can be auto-accepted at 98.8% precision, or 46% at 98.2% once real drugs with no clinical-drug concept are included. Remaining errors split evenly across strength, dose form, ingredient, and brand-versus-generic twins, and a share of the strength errors are underdetermined by the input string. Limitations: VA strings only; a headline that should be read as a band of about two points rather than a point estimate, because the ingredient draw moves it by two to three times the sampling error; and calibration thresholds fit on one split. Code, data, model, and every run are public.
+> **Abstract.** Medication normalization tools reliably map a raw drug string to its RxNorm *ingredient* (RxMap, [Korpela et al 2026](#references), reports F1 ≈ 0.97), but the code a pharmacy or interaction checker needs is the *clinical drug*: ingredient, strength, and dose form resolved together. I ask how far a small retrieval model gets at that level, using a labeled dataset that costs nothing to build: the VA National Drug File (VANDF) is a source vocabulary inside RxNorm, so every VA name that shares a concept identifier with an RxNorm clinical drug is, by NLM's own curation, the same drug. From the 2026-09-08 release I extract 14,372 (VA string, SCD/SBD) pairs over 8,315 targets and a 27,287-candidate pool, split *by ingredient* so the test set contains only drugs whose ingredients were never seen in training. Exact string match scores 0; TF-IDF character n-grams reach acc@1 0.509; a MiniLM bi-encoder fine-tuned with a contrastive loss and ingredient-matched hard negatives reaches 0.836; a 40-line rule that pre-computes RxNorm-style concentrations adds 5 points (0.886); and an 18-run grid shows domain pre-training (SapBERT) is worth a further +8.6 points of validation accuracy, more than either of the other factors; a second 18-run sweep re-checks the smallest factor on six ingredient draws, and ingredient-matched hard negatives beat in-batch-only on every one of them (+1.6 points test acc@1, 95% CI 0.8–2.4). The final model scores **acc@1 0.931 (95% CI 0.918–0.941), recall@5 0.984** on the published test split; re-drawing the ingredient split five more times and retraining puts the same recipe at **0.907 ± 0.019** (range 0.874–0.931), with the published draw the most favorable of the six and training-seed noise at 0.001. Because a 7% error rate is not deployable without review, I calibrate a confidence score and choose thresholds on validation only: 79% of answerable strings can be auto-accepted at 98.8% precision, or 46% at 98.2% once real drugs with no clinical-drug concept are included. Remaining errors split evenly across strength, dose form, ingredient, and brand-versus-generic twins, and a share of the strength errors are underdetermined by the input string. Limitations: VA strings only; a headline that should be read as a band of about two points rather than a point estimate, because the ingredient draw moves it by two to three times the sampling error; and calibration thresholds fit on one split. Code, data, model, and every run are public.
 
 ## 1. Background
 
@@ -105,9 +105,9 @@ The mannitol and estradiol rows are *underdetermined*: no model can read the mis
 
 ### 4.2 Bi-encoder with contrastive fine-tuning
 
-The model is a sentence-transformers bi-encoder ([Reimers & Gurevych 2019](#references)): one encoder maps a string to a unit vector, and the answer is the candidate with the highest cosine. Training uses `MultipleNegativesRankingLoss`, the in-batch softmax loss of [Henderson et al 2017](#references): for a batch of 64 (anchor, positive, hard negative) triplets, each anchor is scored against 128 names, and the loss is cross-entropy with its own positive as the target. The *hard negative* in each triplet is a train-split product with the same ingredients and a different strength or dose form, which is exactly the confusion TF-IDF exhibits (H2). A `NO_DUPLICATES` sampler prevents two VA strings for the same product from landing in one batch and being told each other's positive is wrong. Hard negatives of this kind are the standard remedy for retrievers that find the topic but not the item ([Karpukhin et al 2020](#references)).
+The model is a sentence-transformers bi-encoder ([Reimers & Gurevych 2019](#references)): one encoder maps a string to a unit vector, and the answer is the candidate with the highest cosine. Training uses [`MultipleNegativesRankingLoss`](https://github.com/UKPLab/sentence-transformers/blob/v4.1.0/sentence_transformers/losses/MultipleNegativesRankingLoss.py), the in-batch softmax loss of [Henderson et al 2017](#references): for a batch of 64 (anchor, positive, hard negative) triplets, each anchor is scored against 128 names, and the loss is cross-entropy with its own positive as the target. The *hard negative* in each triplet is a train-split product with the same ingredients and a different strength or dose form, which is exactly the confusion TF-IDF exhibits (H2). A `NO_DUPLICATES` sampler prevents two VA strings for the same product from landing in one batch and being told each other's positive is wrong. Hard negatives of this kind are the standard remedy for retrievers that find the topic but not the item ([Karpukhin et al 2020](#references)).
 
-Three base encoders were compared: `all-MiniLM-L6-v2` (22M parameters, distilled by [Wang et al 2020](#references) and further trained on about a billion sentence pairs), `bge-small-en-v1.5` (33M, [Xiao et al 2023](#references)), and `SapBERT-from-PubMedBERT-fulltext` (110M, [Liu et al 2021](#references)), which was pre-trained to pull UMLS synonyms together and so arrives knowing that `HCL` and `hydrochloride` name the same thing.
+Three base encoders were compared: [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) (22M parameters, distilled by [Wang et al 2020](#references) and further trained on about a billion sentence pairs), [`bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5) (33M, [Xiao et al 2023](#references)), and [`SapBERT-from-PubMedBERT-fulltext`](https://huggingface.co/cambridgeltl/SapBERT-from-PubMedBERT-fulltext) (110M, [Liu et al 2021](#references)), which was pre-trained to pull UMLS synonyms together and so arrives knowing that `HCL` and `hydrochloride` name the same thing.
 
 Fixed hyper-parameters for every run: 4 epochs, batch 64, learning rate 2e-5 with 10% warm-up and linear decay, max sequence length 96, fp16, seed 42. Validation is scored after every epoch against the full pool; the best epoch by `val/acc@1` is kept; test is scored once with that checkpoint. Test never influences a choice.[^first]
 
@@ -137,7 +137,7 @@ Abstention follows the classic reject-option framing ([Chow 1970](#references)):
 
 ### 4.5 The sweep
 
-A full grid over encoder (3) × hard-negative strategy (ingredient-matched, TF-IDF-mined top wrong hit, none) × normalizer (on, off) = 18 runs, one seed each, coordinated as a W&B sweep on a Colab T4. Selection metric is `val/acc@1`; test is shown for reference. The winner was retrained once locally with an artifact logged, then calibrated. The sweep runs themselves do not log models.
+A full grid over encoder (3) × hard-negative strategy (ingredient-matched, TF-IDF-mined top wrong hit, none) × normalizer (on, off) = 18 runs, one seed each, coordinated as a W&B sweep on a Colab A100. Selection metric is `val/acc@1`; test is shown for reference. The winner was retrained once locally with an artifact logged, then calibrated. The sweep runs themselves do not log models. After §5.8 showed how much a split moves the number, a second sweep (`sweeps/negatives_by_split.yaml`) re-ran the one factor whose effect was inside that noise: SapBERT × negatives (3) × normalizer on × splits v1–v6 = 18 runs on one Colab A100, so every comparison is paired within a split.
 
 ## 5. Results
 
@@ -169,7 +169,7 @@ The strength failures had a specific shape:
 
 Converting a percentage to milligrams per millilitre is arithmetic. An embedding model has seen `0.25%` near `2.5 MG/ML` some hundreds of times and learned a fuzzy association, not a rule. That observation is what produced H4.
 
-**Replication.** The identical configuration and seed run in Colab on a T4 (run `0eaijnrv`) gave test 0.839 / 0.969 against 0.836 / 0.967 locally, val 0.774 / 0.932 against 0.773 / 0.927, and chose epoch 4 rather than 3 (val 0.775 vs 0.774, a coin flip). Differences of 3–6 strings in 1,848 are GPU and library nondeterminism; I treat ±0.5 point as the same run. The T4 trained in 91 s against 304 s on the 1070.
+**Replication.** The identical configuration and seed run in Colab on an A100 (run `0eaijnrv`) gave test 0.839 / 0.969 against 0.836 / 0.967 locally, val 0.774 / 0.932 against 0.773 / 0.927, and chose epoch 4 rather than 3 (val 0.775 vs 0.774, a coin flip). Differences of 3–6 strings in 1,848 are GPU and library nondeterminism; I treat ±0.5 point as the same run. The A100 trained in 91 s against 304 s on the 1070.
 
 ### 5.3 The strength normalizer (H4)
 
@@ -188,7 +188,7 @@ Run `all-minilm-l6-v2-ingredient-strength` ([W&B](https://wandb.ai/kettle-labs/r
 
 ### 5.4 The sweep (H5)
 
-Sweep `idhaaw5i` ([W&B](https://wandb.ai/kettle-labs/rxnorm-vandf/sweeps/idhaaw5i)), 18 runs, Colab T4, about 30 minutes in total. Sorted by the selection metric.
+Sweep `idhaaw5i` ([W&B](https://wandb.ai/kettle-labs/rxnorm-vandf/sweeps/idhaaw5i)), 18 runs, Colab A100, about 30 minutes in total. Sorted by the selection metric.
 
 | Encoder | Negatives | Normalizer | val acc@1 | test acc@1 | test recall@5 | test strength acc |
 |---|---|---|---|---|---|---|
@@ -223,7 +223,7 @@ Mean validation acc@1 by factor level:
 
 *Figure 2. Mean validation acc@1 per factor level across the 18-run grid. Data: `figures/data.json`.*
 
-The effects are roughly additive, and the best cell is best on every axis, so there is no interesting interaction to report. On H5: the encoder dominates, and the direction is instructive. `bge-small` is newer and scores higher than MiniLM on general retrieval benchmarks, yet the two are indistinguishable here; SapBERT, which is older and not a general-purpose embedder at all, wins by a wide margin because its pre-training objective (UMLS synonym alignment) is almost this task. Two cautions. Each cell is one seed on one split. §5.8 puts training-seed noise at 0.001 on the same hardware (the ±0.5 point in §5.2 was the GPU and library stack), but the split itself moves test acc@1 by about 0.02 between draws; the encoder effect is far outside that, the normalizer effect comfortably so, and the +3.0 negatives effect is not. And the normalizer's contribution shrinks with SapBERT (+4.0 on its best cell vs +5.6 for MiniLM), consistent with a stronger encoder having absorbed some of the conversions.
+The effects are roughly additive, and the best cell is best on every axis, so there is no interesting interaction to report. On H5: the encoder dominates, and the direction is instructive. `bge-small` is newer and scores higher than MiniLM on general retrieval benchmarks, yet the two are indistinguishable here; SapBERT, which is older and not a general-purpose embedder at all, wins by a wide margin because its pre-training objective (UMLS synonym alignment) is almost this task. Two cautions. Each cell is one seed on one split. §5.8 puts training-seed noise at 0.001 on the same hardware (the ±0.5 point in §5.2 was the GPU and library stack), but the split itself moves test acc@1 by about 0.02 between draws; the encoder effect is far outside that, the normalizer effect comfortably so, and the +3.0 negatives effect is not, which is why §5.9 re-runs it on every split. And the normalizer's contribution shrinks with SapBERT (+4.0 on its best cell vs +5.6 for MiniLM), consistent with a stronger encoder having absorbed some of the conversions.
 
 ### 5.5 Final model
 
@@ -307,7 +307,32 @@ Four things follow.
 
 TF-IDF's difficulty ordering is not the model's: its split-to-split standard deviation is 0.031, and its test accuracy correlates only weakly with SapBERT's across the six draws (r = 0.23; v3 is TF-IDF's easiest split and the model's joint hardest). What is hard for a string matcher (unusual notation) and what is hard for the fine-tuned model (product-rich ingredient families full of twins) are different things. The hardest draw for the model, v4, also happens to be the largest test set, 2,373 pairs, which is what a by-ingredient split does when a few product-rich ingredients land in test.
 
-The sweep's factor effects (§5.4) were measured on v1 only. The encoder (+8.6) and normalizer (+4.8) effects are several times the two-point split noise; the hard-negatives effect (+3.0) is about one and a half times it, and a second split would be needed to call it settled.
+The sweep's factor effects (§5.4) were measured on v1 only. The encoder (+8.6) and normalizer (+4.8) effects are several times the two-point split noise; the hard-negatives effect (+3.0) is about one and a half times it. §5.9 settles that one.
+
+### 5.9 Hard negatives across splits
+
+Sweep `uukeyzw7` ([W&B](https://wandb.ai/kettle-labs/rxnorm-vandf/sweeps/uukeyzw7)): SapBERT with the normalizer on, the three hard-negative strategies, on each of the six splits, 18 runs on one Colab A100 in about 35 minutes. The three v1 cells reproduced the original sweep's v1 cells to four decimals (0.9275 / 0.9232 / 0.9096 test), which says two things: the pipeline is unchanged, and Colab's stack is bit-reproducible on the same GPU type, so the half-point difference in §5.2 was the 1070 against the A100 and nothing else.
+
+| Split | ingredient, test (val) | tfidf, test (val) | none, test (val) | ingredient − none, test | ingredient − none, val |
+|---|---|---|---|---|---|
+| v1 | 0.927 (0.886) | 0.923 (0.864) | 0.910 (0.863) | +0.018 | +0.023 |
+| v2 | 0.906 (0.914) | 0.876 (0.903) | 0.893 (0.899) | +0.013 | +0.015 |
+| v3 | 0.908 (0.914) | 0.897 (0.901) | 0.891 (0.893) | +0.017 | +0.022 |
+| v4 | 0.874 (0.908) | 0.871 (0.899) | 0.851 (0.883) | +0.023 | +0.025 |
+| v5 | 0.921 (0.902) | 0.908 (0.890) | 0.900 (0.865) | +0.021 | +0.038 |
+| v6 | 0.916 (0.878) | 0.900 (0.868) | 0.914 (0.873) | +0.002 | +0.005 |
+
+| Contrast (paired within split, n = 6) | test acc@1, mean | sd | 95% CI | splits with + sign | val acc@1, mean | 95% CI |
+|---|---|---|---|---|---|---|
+| **ingredient − none** | **+0.016** | 0.007 | +0.008 to +0.024 | **6 / 6** | +0.021 | +0.010 to +0.033 |
+| ingredient − tfidf | +0.013 | 0.010 | +0.002 to +0.023 | 6 / 6 | +0.013 | +0.008 to +0.018 |
+| tfidf − none | +0.003 | 0.015 | −0.013 to +0.019 | 4 / 6 | +0.008 | −0.003 to +0.020 |
+
+![Hard-negative strategy per split](figures/negatives_by_split.png)
+
+*Figure 6. Test (left) and validation (centre) acc@1 for the three hard-negative strategies on each split, and the paired ingredient − none difference on test (right) with its mean and 95% interval. Data: `figures/data.json`; runs in sweep `uukeyzw7`.*
+
+The effect survives. Ingredient-matched negatives beat in-batch-only on all six splits, by 1.6 points of test acc@1 on average, with the smallest win (v6, +0.002) still positive; with six pairs, six of six is the only sign count that reaches p < 0.05, and the paired interval excludes zero on both test and validation. The original +3.0 in §5.4 was a validation number averaged over all encoders; on SapBERT alone and paired by split it is +2.1 on validation and +1.6 on test, so the single-split sweep overstated it by about a third but had the sign and the ranking right. TF-IDF-mined negatives are not distinguishable from in-batch only (+0.003, sign split four to two), which is what §5.4 found and now holds across draws. Recall@5 does not depend on the strategy at all (−0.002 ± 0.004): the negatives sharpen the top-1 choice among candidates the model already retrieves. The two factors that were not re-run, encoder and normalizer, have single-split effects several times the split noise and are left as measured.
 
 ## 6. Discussion
 
@@ -322,11 +347,11 @@ The sweep's factor effects (§5.4) were measured on v1 only. The encoder (+8.6) 
 | H5 | one factor dominates | encoder, +8.6, nearly twice the normalizer and nearly three times negatives |
 | H6 | calibrated score allows meaningful auto-acceptance; drops with unanswerable strings | 79% at 98.8%; 46% at 98.2% |
 
-None of the hypotheses concerned the split, and the experiment that tested it (§5.8) changed the headline more than any of them: the same recipe scores 0.874 to 0.931 depending on which ingredients are held out. The one conclusion I would carry to another project is H4's: when a model's failures are deterministic, write the rule and let the model do what it is good at, which is matching strings. The second is H5's: a domain-aligned pre-training objective mattered more than parameter count or benchmark recency, and it is cheap to check, since SapBERT trains in two minutes on a T4.
+None of the hypotheses concerned the split, and the experiment that tested it (§5.8) changed the headline more than any of them: the same recipe scores 0.874 to 0.931 depending on which ingredients are held out. The one sweep factor small enough to be at risk from that, hard negatives, held on all six draws (§5.9). The one conclusion I would carry to another project is H4's: when a model's failures are deterministic, write the rule and let the model do what it is good at, which is matching strings. The second is H5's: a domain-aligned pre-training objective mattered more than parameter count or benchmark recency, and it is cheap to check, since SapBERT trains in two minutes on a Colab A100.
 
 ### 6.2 Threats to validity
 
-- **Six splits, not sixty.** The final recipe was retrained on six ingredient draws (§5.8); the baselines, the sweep, and the calibration were run on one. Six draws pin the split standard deviation to a factor of about two, so "0.907 ± 0.019" is a band, not a measurement of the band's width. The sweep's smallest effect (hard negatives, +3.0) is the one that a second split could plausibly overturn. Training-seed noise is measured and negligible.
+- **Six splits, not sixty.** The final recipe (§5.8) and the hard-negatives factor (§5.9) were run on six ingredient draws; the baselines, the encoder and normalizer factors, and the calibration were run on one. Six draws pin the split standard deviation to a factor of about two, so "0.907 ± 0.019" is a band, not a measurement of the band's width. The two factors not re-run have single-split effects of +8.6 and +4.8, several times that band. Training-seed noise is measured and negligible.
 - **VA strings only.** Training and evaluation are on one institution's naming conventions. Another hospital's formulary is a different distribution, and generalization to it is unmeasured. The held-out-ingredient split guards against memorizing drugs, not against memorizing the VA's abbreviation habits.
 - **Not comparable to RxMap.** RxMap's numbers are on MEPS strings at the ingredient level; mine are on VA strings at the clinical-drug level. The framing in §1.2 is that these are different tasks, not that one system beats the other.
 - **Threshold transfer.** The 99% target reached 98.2–98.8% on test. Anyone deploying a threshold should re-choose it on their own held-out data and expect a similar shortfall.
@@ -341,11 +366,11 @@ None of the hypotheses concerned the split, and the experiment that tested it (�
 
 ### 6.4 Cost
 
-The first model trains in 5 minutes on a 2016 consumer GPU and 91 seconds on a free Colab T4; the final model in 20 minutes locally or about 2 on the T4; the whole 18-run grid in about 30 minutes of T4 time. Data preparation is seconds. The expensive input was the RxNorm data model, not compute.
+The first model trains in 5 minutes on a 2016 consumer GPU and 91 seconds on a Colab A100; the final model in 20 minutes locally or about 2 on the A100; the whole 18-run grid in about 30 minutes of A100 time, and the second 18-run sweep of §5.9 about 35 minutes more. Data preparation is seconds. The expensive input was the RxNorm data model, not compute.
 
 ## 7. Further work
 
-1. The sweep and the calibration on a second split, and a k-fold by ingredient for the final recipe, to tighten the two-point band in §5.8 and to test whether the +3.0 hard-negatives effect survives a re-draw.
+1. The calibration on a second split, and a k-fold by ingredient for the final recipe, to tighten the two-point band in §5.8 and to see whether the abstention thresholds transfer across draws as well as the accuracy does.
 2. The 1,327 `mixed` combination-drug pairs as a "partially seen ingredients" evaluation.
 3. Auxiliary ingredient / strength / dose-form heads. Deferred because the taxonomy already comes from the retrieved candidate's labels; they might still help as a training signal.
 4. Cross-institution transfer: fine-tune on VA, evaluate on another source vocabulary's names that share RXCUIs (the same trick that built this dataset works for any RxNorm source).
@@ -358,6 +383,16 @@ The first model trains in 5 minutes on a 2016 consumer GPU and 91 seconds on a f
 - **Dataset:** [kvenanzi/vandf-rxnorm-pairs](https://huggingface.co/datasets/kvenanzi/vandf-rxnorm-pairs). Derived only from the two unrestricted RxNorm sources; no UTS account is needed to reproduce the numbers.
 - **Every run:** the W&B project [kettle-labs/rxnorm-vandf](https://wandb.ai/kettle-labs/rxnorm-vandf) holds the story runs, the sweep, and the calibration runs. The [W&B Report](https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA) presents them with live panels: run comparison, validation accuracy by epoch, the sweep's parallel coordinates, and the precision-versus-coverage curves.
 
+<!-- qmd
+::: {.column-page-right}
+```{=html}
+<iframe src="https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA"
+        title="W&B Report: VANDF to RxNorm, how far a small model gets at the clinical-drug level"
+        loading="lazy" style="border:none;width:100%;height:900px"></iframe>
+```
+:::
+-->
+
 ## Appendix A: Experiment log
 
 All work was done 2026-09-11 against the 2026-09-08 release, in the order below, except the split-variance runs of 2026-09-14. Run identifiers are W&B run IDs in `kettle-labs/rxnorm-vandf`.
@@ -369,11 +404,12 @@ All work was done 2026-09-11 against the 2026-09-08 release, in the order below,
 - **First model** (`fked1jx1`). MiniLM, ingredient negatives, GTX 1070, 4.8 minutes. Test 0.836 / 0.967. Artifact `vandf-rxnorm-biencoder:v0`. Colab replication `0eaijnrv`: 0.839 / 0.969, artifact `:v1`.
 - **Calibration of the first model.** Temperature 0.034. Matched / softmax: AUROC 0.885, ECE 0.028, 65.8% at 0.963 and 40.1% at 0.995. +hard / platt: 0.899, 0.035, 41.3% at 0.958 and 21.7% at 0.978. +all / platt: 0.984, 0.055, 7.6% at 0.940 and 2.4% at 0.976. Raw cosine on matched: 13.0% at 0.963. Margin was already the worst signal on +hard (1.4% coverage).
 - **Normalizer** (`x9p04t9i`). Test 0.886 / 0.975; val 0.829. Artifact `:v2`. Calibrated (temperature 0.029): matched / softmax 47.0% at 0.993; +hard / platt 30.2% at 0.972; +all / platt 3.2% at 0.979. Over-confident bins: stated 0.56 → 41% accurate, 0.66 → 52%.
-- **Sweep** (`idhaaw5i`). 18 runs, T4, about 30 minutes. Table in §5.4. SapBERT about 2 minutes per run.
+- **Sweep** (`idhaaw5i`). 18 runs, Colab A100, about 30 minutes. Table in §5.4. SapBERT about 2 minutes per run.
 - **Final model** (`0d9ntjls`). SapBERT + ingredient negatives + normalizer, GTX 1070, 19.5 minutes, train loss 0.034. Test 0.931 / 0.984; val 0.883 / 0.961. Artifact `:v3`. Calibrated (temperature 0.042): table in §5.6.
 - **Inference wrapper.** `Mapper` reproduces 0.931 through the public path; at the shipped threshold 0.922 it accepts 55.5% of matched test strings at 99.2% precision. Unit tests cover a hit, a supply (abstain), and the hyoscyamine elixir (wrong top-1 at 0.77, routed to review, truth listed second).
 - **Taxonomy correction.** An earlier reading of the final model's errors as "over half strength" was the MiniLM mix; the recomputed split is 46 / 43 / 31 / 25 of 128, as in §5.7.
 - **Split and seed variance** (2026-09-14, `12_split_seeds.py`). Five more salts (`rxnorm-2026-09-08-v2` … `-v6`) built into `data/splits/` without touching `data/processed`; the final recipe on each at seed 42 (`lqf7dett` v1, `0c2jqaf1` v2, `i5pj0dbc` v3, `aa7hcyap` v4, `r3asp4in` v5, `kflhpyjx` v6) plus v1 at seeds 1 and 2 (`0x22n7cb`, `zuj9ec29`), GTX 1070, about 20 minutes each, no model artifacts. Test acc@1 0.931 / 0.905 / 0.905 / 0.874 / 0.921 / 0.910; seeds 0.930 / 0.932. Table in §5.8. Splits also logged as artifact `vandf-rxnorm-splits:v0` for Colab (`notebooks/03_split_seeds.ipynb`); `vandf-rxnorm-pairs` unchanged at `v0`. Rebuilding the dataset also exposed a pre-existing nondeterminism, the order of strengths inside the label of about 20 combination vaccines, fixed with extra sort keys; splits and every other column were identical.
+- **Hard negatives across splits** (2026-09-14, sweep `uukeyzw7`, `sweeps/negatives_by_split.yaml`). SapBERT + normalizer × {ingredient, tfidf, none} × splits v1–v6, 18 runs on one Colab A100, 92–136 s each. The v1 cells matched sweep `idhaaw5i`'s to four decimals. Paired ingredient − none on test: +0.018 / +0.013 / +0.017 / +0.023 / +0.021 / +0.002, mean +0.016 (95% CI +0.008 to +0.024), 6 / 6 positive. Tables in §5.9. Run metadata also showed that every Colab run in this project, including the original sweep and the §5.2 replication, was on an A100 rather than the T4 earlier drafts named; corrected throughout.
 
 ## Appendix B: Decisions
 
@@ -407,6 +443,8 @@ All work was done 2026-09-11 against the 2026-09-08 release, in the order below,
 | Split-variance runs log no model artifact; new splits live under a separate artifact name | Eight more 0.4 GB checkpoints for nothing; re-logging `vandf-rxnorm-pairs` would move `:latest` off the published split for every Colab run |
 | The published split is re-run inside the variance batch rather than reused | The published run was the sweep's selection cell and ran on different hardware; a same-batch repeat is the fair comparison, and it doubles as the pipeline check |
 | The dataset builder refuses a new salt into `data/processed` | Every model, figure, and test reads that folder; a silent re-draw there would change every downstream number |
+| Negatives re-run per split at SapBERT + normalizer only, not the full grid | 18 runs answer the one effect inside the split noise; 108 would not change the encoder or normalizer verdicts |
+| The second sweep includes v1 rather than reusing the first sweep's v1 cells | Same machine and stack for every pair; the reuse would have been fine (the cells matched to four decimals), but that was not known in advance |
 
 ## References
 
@@ -437,6 +475,6 @@ All work was done 2026-09-11 against the 2026-09-08 release, in the order below,
 
 [^forty]: From NLM's [RxNorm Overview](https://www.nlm.nih.gov/research/umls/rxnorm/overview.html): "About 60% of the drug names from RxNorm source vocabularies receive RxNorm normalized names. The other 40% of source vocabulary drug names do not receive RxNorm normalized names because they are either out-of-scope or their names are too ambiguous. The most common types of names that are not assigned RxNorm normalized names are medical devices, foods, and enzymes." In this dataset, 17,564 of the 31,936 distinct active VA CD/AB strings (55%) have no SCD/SBD; the VA file runs heavier on supplies and nutrition than NLM's average source.
 
-[^conf]: Status and confidence tags follow the gwern.net convention; the confidence word is from the Kesselman (2008) scale of verbal probabilities. "Likely" here means I expect the main effects (encoder > normalizer > negatives; calibration enabling roughly half to three-quarters auto-acceptance at about 98%) to hold under a second split seed, but not the third decimal of any number. After §5.8 the headline is the third decimal's worst case: the final recipe moved 2.4 points on average when the split was re-drawn, while its recall@5 and component accuracies barely moved. The factor ordering itself was not re-run per split.
+[^conf]: Status and confidence tags follow the gwern.net convention; the confidence word is from the [Kesselman 2008](#references) scale of verbal probabilities. "Likely" here means I expect the main effects (encoder > normalizer > negatives; calibration enabling roughly half to three-quarters auto-acceptance at about 98%) to hold under a second split seed, but not the third decimal of any number. After §5.8 the headline is the third decimal's worst case: the final recipe moved 2.4 points on average when the split was re-drawn, while its recall@5 and component accuracies barely moved. Of the three sweep factors, only hard negatives, the one inside the split noise, was re-run per split, and it held on every draw (§5.9); the encoder and normalizer verdicts rest on one split and effects several times the noise.
 
 [^first]: This was my first trained model and my first use of an experiment tracker, which is one reason the protocol (validation picks, test reported once, thresholds chosen off-test) is spelled out at a level a practitioner would take for granted.
