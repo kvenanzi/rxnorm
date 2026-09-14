@@ -1,0 +1,35 @@
+# Make-up grid for sweeps/levers.yaml: the twelve aux=none cells on splits v3,
+# v4, v5 that failed in sweep nypttmi8 (a loader assertion on a few MTHSPL
+# strings whose targets span splits; fixed in rxnorm_vandf/data.py). A grid
+# sweep never re-issues a failed cell, so they are re-run here and merged by
+# `13_levers.py summarize --sweep nypttmi8 --sweep <this id>`.
+name: levers-rerun
+method: grid
+metric:
+  name: val/acc@1
+  goal: maximize
+parameters:
+  base_model:
+    value: cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+  negatives:
+    value: ingredient
+  normalize_strength:
+    value: true
+  dataset_artifact:
+    value: vandf-rxnorm-multi:v0
+  dataset_subdir:
+    values: [v3, v4, v5]
+  train_sources:
+    values: ["VANDF", "VANDF,MTHSPL"]
+  aux:
+    value: none
+  aux_weight:
+    value: 0.01
+  seed:
+    values: [42, 1]
+  epochs:
+    value: 4
+  batch_size:
+    value: 64
+  lr:
+    value: 2.0e-5

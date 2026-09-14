@@ -17,7 +17,7 @@ Run from the repo root:
   uv run scripts/08_sweep.py --create --config sweeps/levers.yaml            # then notebooks/05_levers.ipynb
   uv run scripts/08_sweep.py --create --config sweeps/levers_control_steps.yaml
   uv run scripts/08_sweep.py --create --config sweeps/levers_control_size.yaml
-  uv run scripts/13_levers.py summarize [--sweep ID] [--steps ID] [--size ID]
+  uv run scripts/13_levers.py summarize [--sweep ID ...] [--steps ID] [--size ID]
 """
 
 import argparse
@@ -185,12 +185,20 @@ def controls(cells: dict, steps: dict, size: dict) -> dict:
 
 
 def cmd_summarize(args: argparse.Namespace) -> None:
-    from rxnorm_vandf.wb import LEVERS_CONTROL_SWEEP_IDS, LEVERS_SWEEP_ID
+    from rxnorm_vandf.wb import LEVERS_CONTROL_SWEEP_IDS, LEVERS_SWEEP_IDS
 
-    sweep_id = args.sweep or LEVERS_SWEEP_ID
-    if not sweep_id:
-        raise SystemExit("no sweep id: pass --sweep or fill in LEVERS_SWEEP_ID in rxnorm_vandf/wb.py")
-    cells, ids = fetch_cells(sweep_id)
+    sweep_ids = args.sweep or LEVERS_SWEEP_IDS
+    if not sweep_ids:
+        raise SystemExit("no sweep id: pass --sweep or fill in LEVERS_SWEEP_IDS in rxnorm_vandf/wb.py")
+    # Several sweeps can hold cells of the one grid (a make-up sweep for cells
+    # that failed); the newest finished run of a cell wins across all of them.
+    cells, ids = {}, {}
+    for sid in sweep_ids:
+        c, i = fetch_cells(sid)
+        for key in c:
+            if key not in cells or i[key][1] > ids[key][1]:
+                cells[key], ids[key] = c[key], i[key]
+    sweep_id = "+".join(sweep_ids)
     expected = [((k, s), a) for k in SPLITS for s in SEEDS for a in ARMS.values()]
     missing = [f"{k}/s{s}/{a}" for (k, s), a in expected if ((k, s), a) not in cells]
     if missing:
@@ -263,7 +271,7 @@ def main() -> None:
     b = sub.add_parser("build"); b.add_argument("--rebuild", action="store_true"); b.set_defaults(fn=cmd_build)
     sub.add_parser("upload").set_defaults(fn=cmd_upload)
     s = sub.add_parser("summarize")
-    s.add_argument("--sweep", help="levers sweep id (default: wb.LEVERS_SWEEP_ID)")
+    s.add_argument("--sweep", action="append", help="levers sweep id, repeatable (default: wb.LEVERS_SWEEP_IDS)")
     s.add_argument("--steps", help="steps-control sweep id"); s.add_argument("--size", help="size-control sweep id")
     s.set_defaults(fn=cmd_summarize)
     args = ap.parse_args()

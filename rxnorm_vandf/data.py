@@ -50,8 +50,14 @@ def load_data(processed_dir: Path) -> Data:
         .agg(split=("split", "first"), n_splits=("split", "nunique"), targets=("target_rxcui", list))
         .reset_index()
     )
-    if (grouped["n_splits"] > 1).any():
-        raise ValueError("a query string maps to targets in different splits")
+    # A string whose targets sit in different splits (a few MTHSPL label names
+    # cover two products with different ingredients; never a VA string) can be
+    # neither trained on nor scored without leaking, so it is dropped.
+    straddling = grouped["n_splits"] > 1
+    if straddling.any():
+        print(f"dropping {int(straddling.sum())} query strings whose targets span splits: "
+              + ", ".join(f"{s}={n}" for s, n in grouped.loc[straddling, "source"].value_counts().items()))
+        grouped = grouped[~straddling].reset_index(drop=True)
     grouped = grouped.drop(columns="n_splits")
     valid = [{rxcui_to_id[r] for r in ts} for ts in grouped["targets"]]
     cand_key = list(zip(

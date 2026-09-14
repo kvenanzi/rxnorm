@@ -110,6 +110,19 @@ def test_load_data_keeps_val_test_keys_vandf_only(tmp_path):
     assert res["test"]["metrics"]["n"] == 1 and res["test"]["metrics"]["acc@1"] == 0.0
 
 
+def test_load_data_drops_strings_whose_targets_span_splits(tmp_path, capsys):
+    from rxnorm_vandf.data import load_data
+    _write_folder(tmp_path, with_source=True)
+    pairs = pd.read_parquet(tmp_path / "pairs.parquet")
+    # the MTHSPL string also maps to the test-split product: ambiguous, dropped
+    extra = pd.DataFrame({"vandf_string": ["A 1 mg [x]"], "target_rxcui": ["3"], "split": ["test"], "strength": ["1 MG"], "source": ["MTHSPL"]})
+    pd.concat([pairs, extra]).to_parquet(tmp_path / "pairs.parquet")
+    d = load_data(tmp_path)
+    assert len(d.queries) == 3 and "MTHSPL" not in set(d.queries["source"])
+    assert "dropping 1 query strings" in capsys.readouterr().out
+    assert d.sources == ("VANDF",)
+
+
 def test_train_config_back_compat_and_sources_normalization():
     from rxnorm_vandf.train import TrainConfig, auto_name
     old = json.loads((ROOT / "tests" / "fixtures" / "train_config_v3.json").read_text())

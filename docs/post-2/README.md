@@ -46,7 +46,7 @@ Written before any of the 48 runs had been started; the pilot in Appendix A chos
 
 ## 6. Reproduction
 
-Everything runs from the commands in the repository README under "The follow-up". Sweeps `nypttmi8` (main; `j1zdu28j` was registered with the pilot's 0.2 weight and never run), `2exoct4h` (steps control), `ocmpf5na` (size control); W&B group `kfold-k7`; artifacts `vandf-rxnorm-multi:v0` and `vandf-rxnorm-kfold:v0` for the data, `vandf-rxnorm-predictions` per fold, `vandf-rxnorm-biencoder-final-all` for the all-data model. The published `vandf-rxnorm-pairs`, `vandf-rxnorm-splits`, and `vandf-rxnorm-biencoder` artifacts are untouched.
+Everything runs from the commands in the repository README under "The follow-up". Sweeps `nypttmi8` (main) and `5cr5ze02` (twelve aux-off cells on v3, v4, v5 re-run after the loader fix noted in Appendix A; `j1zdu28j` was registered with the pilot's 0.2 weight and never run), `2exoct4h` (steps control), `ocmpf5na` (size control); W&B group `kfold-k7`; artifacts `vandf-rxnorm-multi:v0` and `vandf-rxnorm-kfold:v0` for the data, `vandf-rxnorm-predictions` per fold, `vandf-rxnorm-biencoder-final-all` for the all-data model. The published `vandf-rxnorm-pairs`, `vandf-rxnorm-splits`, and `vandf-rxnorm-biencoder` artifacts are untouched.
 
 ## Appendix A: Experiment log
 
@@ -63,6 +63,8 @@ Everything runs from the commands in the repository README under "The follow-up"
 
   A monotone dose-response: the heavier the head, the lower the validation accuracy, the earlier the best epoch, and the more ingredient and dose-form accuracy give way, while strength accuracy never moves. The grid uses 0.01, the largest weight that is not already worse than no head on one split; H2 is tested at that weight. The pilot was run on the published split and is not part of the paired analysis.
 
+- **First sweep session** (2026-09-14, A100). The v1 VA-only cell reproduced the first write-up's 0.927 test acc@1 exactly. Twelve cells on v3, v4, v5 then failed in seconds: six, four, and one MTHSPL label names in those draws map to two products whose ingredients fall in different splits, and the new loader raised on them rather than dropping them. No VA string does this on any draw. The loader now drops such strings (they can be neither trained on nor scored without leaking), and the twelve cells run again as sweep `5cr5ze02`; a grid sweep never re-issues a failed cell.
+
 ## Appendix B: Decisions
 
 | Decision | Reason |
@@ -77,3 +79,4 @@ Everything runs from the commands in the repository README under "The follow-up"
 | Unmatched strings assigned to one fold by hash | They are never trained on, so any fold's model scores them out-of-fold; the hash counts each once |
 | Only the all-data model persists its weights | 48 sweep checkpoints would be about 21 GB for nothing; the fold models are summarized by their predictions |
 | A separate artifact name for the all-data model | `vandf-rxnorm-biencoder:latest` must keep pointing at the published model |
+| Strings whose targets span splits are dropped at load time | Eleven MTHSPL names across three draws; leaving them in would leak a held-out ingredient into training or score an unanswerable query |
