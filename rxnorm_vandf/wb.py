@@ -19,6 +19,20 @@ STORY_RUNS = {
 }
 SWEEP_ID = "idhaaw5i"
 
+# The split-and-seed-variance runs (scripts/12_split_seeds.py), job -> run id.
+# Selected by id in the report, like STORY_RUNS, so a crashed or duplicate run
+# in the same group can never land in a panel.
+SPLIT_SEED_RUNS: dict[str, str] = {
+    "split-v1": "lqf7dett",
+    "split-v2": "0c2jqaf1",
+    "split-v3": "i5pj0dbc",
+    "split-v4": "aa7hcyap",
+    "split-v5": "r3asp4in",
+    "split-v6": "kflhpyjx",
+    "seed-1": "0x22n7cb",
+    "seed-2": "zuj9ec29",
+}
+
 
 def api() -> wandb.Api:
     return wandb.Api()

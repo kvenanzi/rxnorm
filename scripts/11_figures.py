@@ -2,8 +2,10 @@
 
 Writes docs/post/figures/*.png and figures/data.json (the numbers behind each).
 Run from the repo root:  uv run scripts/11_figures.py
+                         uv run scripts/11_figures.py --only split_seeds   # one figure; data.json merged
 """
 
+import argparse
 import json
 from collections import Counter
 from pathlib import Path
@@ -196,18 +198,81 @@ def fig_error_taxonomy() -> dict:
     return {l: dict(c) for l, c in results.items()}
 
 
+def fig_split_seeds() -> dict:
+    """Val and test acc@1 of the final configuration on six ingredient splits, the
+    seed repeats on the published split, and TF-IDF on the same splits. Reads
+    outputs/split_seeds/summary.json (scripts/12_split_seeds.py summarize)."""
+    summary = json.loads((ROOT / "outputs" / "split_seeds" / "summary.json").read_text())
+    rows = {r["job"]: r for r in summary["rows"]}
+    splits = [f"v{i}" for i in range(1, 7)]
+    seed_rows = [rows[j] for j in ("seed-1", "seed-2") if j in rows]
+
+    fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.6), sharey=True,
+                             gridspec_kw={"width_ratios": [3, 2]})
+    y = np.arange(len(splits))
+    for ax, (label, val_key, test_key, xlim) in zip(axes, [
+            ("SapBERT + negatives + normalizer", "val/acc@1", "test/acc@1", None),
+            ("TF-IDF (no training)", "tfidf/val/acc@1", "tfidf/test/acc@1", None)]):
+        for yi, key in zip(y, splits):
+            r = rows.get(f"split-{key}")
+            if r is None or r.get(val_key) is None:
+                continue
+            v, t = r[val_key], r[test_key]
+            ax.plot([v, t], [yi, yi], color=GRID, linewidth=2, zorder=1)
+            ax.scatter([t], [yi], s=60, color=SERIES[0], zorder=3, edgecolor=SURFACE, linewidth=1.2,
+                       label="test" if yi == 0 else None)
+            ax.scatter([v], [yi], s=60, color=SERIES[1], zorder=3, edgecolor=SURFACE, linewidth=1.2,
+                       label="validation" if yi == 0 else None)
+        if val_key == "val/acc@1":
+            for k, r in enumerate(seed_rows):
+                off = 0.22 * (k + 1)
+                ax.scatter([r["test/acc@1"]], [off], s=34, facecolor=SURFACE, edgecolor=SERIES[0], linewidth=1.4,
+                           zorder=3, label="test, other training seed" if k == 0 else None)
+                ax.scatter([r["val/acc@1"]], [off], s=34, facecolor=SURFACE, edgecolor=SERIES[1], linewidth=1.4,
+                           zorder=3, label="validation, other training seed" if k == 0 else None)
+            st = summary["stats"].get("splits", {}).get("test/acc@1")
+            if st:
+                ax.axvspan(st["mean"] - st["sd"], st["mean"] + st["sd"], color=SERIES[0], alpha=0.08, zorder=0)
+                ax.axvline(st["mean"], color=SERIES[0], alpha=0.35, linewidth=1, zorder=0)
+        ax.set_title(label, loc="left", color=INK, fontsize=10.5)
+        ax.set_xlabel("acc@1 against all 27,287 candidates")
+        style(ax)
+    axes[0].set_yticks(y, [f"split {k}" + ("  (published)" if k == "v1" else "") for k in splits])
+    axes[0].set_ylim(len(splits) - 0.5, -0.8)       # inverted; headroom for the seed markers on the v1 row
+    for ax in axes:
+        lo, hi = ax.get_xlim()
+        ax.set_xlim(lo - 0.02 * (hi - lo), hi + 0.02 * (hi - lo))
+    fig.legend(*axes[0].get_legend_handles_labels(), frameon=False, fontsize=8.5, ncol=4,
+               loc="upper center", bbox_to_anchor=(0.5, 0.0))
+    fig.suptitle("The same recipe on six ingredient draws: the split moves the number more than the seed",
+                 x=0.01, y=1.04, ha="left", color=INK, fontsize=11)
+    fig.savefig(OUT / "split_seeds.png")
+    plt.close(fig)
+    return {"rows": summary["rows"], "stats": summary["stats"], "published": summary["published"]}
+
+
+FIGURES = {
+    "progression": lambda: fig_progression({name: dict(run(rid).summary) for name, rid in STORY_RUNS.items()}),
+    "sweep_effects": fig_sweep_effects,
+    "precision_coverage": fig_precision_coverage,
+    "error_taxonomy": fig_error_taxonomy,
+    "split_seeds": fig_split_seeds,
+}
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", choices=list(FIGURES), action="append",
+                    help="build only these figures; their keys are merged into the existing data.json")
+    args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
-    summaries = {name: dict(run(rid).summary) for name, rid in STORY_RUNS.items()}
-    payload = {
-        "progression": fig_progression(summaries),
-        "sweep_effects": fig_sweep_effects(),
-        "precision_coverage": fig_precision_coverage(),
-        "error_taxonomy": fig_error_taxonomy(),
-    }
-    (OUT / "data.json").write_text(json.dumps(payload, indent=2, default=float))
-    for p in sorted(OUT.glob("*.png")):
-        print("wrote", p.relative_to(ROOT))
+    names = args.only or list(FIGURES)
+    data_path = OUT / "data.json"
+    payload = json.loads(data_path.read_text()) if args.only and data_path.exists() else {}
+    for name in names:
+        payload[name] = FIGURES[name]()
+        print("wrote", (OUT / f"{name}.png").relative_to(ROOT))
+    data_path.write_text(json.dumps(payload, indent=2, default=float))
 
 
 if __name__ == "__main__":

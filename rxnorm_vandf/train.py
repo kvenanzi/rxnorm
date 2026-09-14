@@ -43,6 +43,11 @@ class TrainConfig:
     output_dir: str = "models"
     run_name: str | None = None
     tags: list[str] = field(default_factory=list)
+    group: str | None = None          # W&B run group, e.g. "split-seeds"; None = ungrouped
+    # Which dataset artifact a run consumes (lineage when data_dir is set; the
+    # download when it is not), and an optional folder inside it.
+    dataset_artifact: str = f"{DATASET_ARTIFACT}:latest"
+    dataset_subdir: str | None = None
 
 
 def auto_name(cfg: "TrainConfig") -> str:
@@ -178,7 +183,7 @@ def train(cfg: TrainConfig, sweep: bool = False) -> Path:
         run.config.update(asdict(cfg), allow_val_change=True)
     else:
         run = wandb.init(project=WANDB_PROJECT, job_type="train", name=cfg.run_name or auto_name(cfg),
-                         config=asdict(cfg), tags=tags)
+                         config=asdict(cfg), tags=tags, group=cfg.group)
 
     random.seed(cfg.seed); np.random.seed(cfg.seed); torch.manual_seed(cfg.seed)
     rng = random.Random(cfg.seed)
@@ -187,10 +192,15 @@ def train(cfg: TrainConfig, sweep: bool = False) -> Path:
     if cfg.data_dir:
         data_dir = Path(cfg.data_dir)
         if not offline:
-            run.use_artifact(f"{DATASET_ARTIFACT}:latest")     # lineage only
+            run.use_artifact(cfg.dataset_artifact)     # lineage only
     else:
-        data_dir = Path(run.use_artifact(f"{DATASET_ARTIFACT}:latest").download())
+        data_dir = Path(run.use_artifact(cfg.dataset_artifact).download())
+    if cfg.dataset_subdir:
+        data_dir = data_dir / cfg.dataset_subdir
     data = load_data(data_dir)
+    split_meta = data_dir / "split.json"     # written by 03_build_dataset.py; absent in older folders
+    if split_meta.exists():
+        run.config.update({"split_salt": json.loads(split_meta.read_text())["salt"]}, allow_val_change=True)
     print(f"{len(data.queries):,} VA strings, {len(data.cand):,} candidates; "
           f"device={'cuda' if torch.cuda.is_available() else 'cpu'}")
 

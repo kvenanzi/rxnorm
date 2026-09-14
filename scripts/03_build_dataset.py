@@ -7,8 +7,15 @@ Writes three Parquet files to data/processed/:
   unmatched.parquet   active VANDF names with no SCD/SBD: future abstention examples
 
 Run from the repo root after 01_load_duckdb.py:  uv run scripts/03_build_dataset.py
+
+A different split (for the split-variance experiment, scripts/12_split_seeds.py)
+is drawn with a different salt, and must go to its own directory:
+  uv run scripts/03_build_dataset.py --salt rxnorm-2026-09-08-v2 --out-dir data/splits/v2
 """
 
+import argparse
+import json
+import re
 from pathlib import Path
 
 import duckdb
@@ -16,16 +23,22 @@ import duckdb
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "rxnorm.duckdb"
 OUT_DIR = ROOT / "data" / "processed"
+RXNORM_RELEASE = "2026-09-08"
 
 # Splits are assigned per ingredient, not per row, so test drugs contain only
 # ingredients the model never saw in training. md5 keeps the assignment stable
 # across runs and DuckDB versions; change the salt to draw a different split.
 SPLIT_SALT = "rxnorm-2026-09-08-v1"
 TEST_PCT, VAL_PCT = 15, 15
+SALT_RE = re.compile(r"^[A-Za-z0-9._-]+$")   # the salt is interpolated into SQL literals
 
-# RXNREL reads right to left: RXCUI2 --RELA--> RXCUI1,
-# e.g. "Oral Tablet is dose_form_of <SCD>".
-BUILD = f"""
+def build_sql(salt: str) -> str:
+    """The SQL that builds the pairs, candidates, and unmatched tables under one split salt."""
+    if not SALT_RE.match(salt):
+        raise ValueError(f"salt must match {SALT_RE.pattern}: {salt!r}")
+    # RXNREL reads right to left: RXCUI2 --RELA--> RXCUI1,
+    # e.g. "Oral Tablet is dose_form_of <SCD>".
+    return f"""
 -- Active RxNorm normalized names we need, one row per concept.
 CREATE TEMP TABLE rx AS
 SELECT RXCUI, TTY, STR FROM rxnconso
@@ -66,7 +79,7 @@ SELECT ingredient_rxcui,
             ELSE 'train' END AS split
 FROM (
     SELECT DISTINCT ingredient_rxcui,
-           md5_number(ingredient_rxcui || '{SPLIT_SALT}') % 100 AS bucket
+           md5_number(ingredient_rxcui || '{salt}') % 100 AS bucket
     FROM target_components
 );
 
@@ -76,9 +89,11 @@ FROM (
 CREATE TEMP TABLE candidates AS
 WITH comp AS (
     SELECT rxcui,
-           list(ingredient ORDER BY ingredient) AS ingredients,
-           list(ingredient_rxcui ORDER BY ingredient) AS ingredient_rxcuis,
-           string_agg(strength, ' / ' ORDER BY ingredient) AS strength,
+           -- A combination vaccine can list one ingredient several times with
+           -- different strengths; the extra sort keys make the labels deterministic.
+           list(ingredient ORDER BY ingredient, ingredient_rxcui, strength) AS ingredients,
+           list(ingredient_rxcui ORDER BY ingredient, ingredient_rxcui, strength) AS ingredient_rxcuis,
+           string_agg(strength, ' / ' ORDER BY ingredient, ingredient_rxcui, strength) AS strength,
            CASE WHEN count(DISTINCT split) = 1 THEN any_value(split) ELSE 'mixed' END AS split
     FROM target_components JOIN ingredient_split USING (ingredient_rxcui)
     GROUP BY rxcui
@@ -135,7 +150,7 @@ WITH rxnorm_tty AS (
     GROUP BY RXCUI
 )
 SELECT v.STR AS vandf_string, v.vandf_ttys, v.RXCUI AS rxcui, r.rxnorm_tty,
-       CASE WHEN md5_number(v.STR || '{SPLIT_SALT}') % 2 = 0 THEN 'val' ELSE 'test' END AS split
+       CASE WHEN md5_number(v.STR || '{salt}') % 2 = 0 THEN 'val' ELSE 'test' END AS split
 FROM vandf v
 LEFT JOIN rxnorm_tty r USING (RXCUI)
 WHERE v.RXCUI NOT IN (SELECT rxcui FROM candidates)
@@ -143,26 +158,56 @@ WHERE v.RXCUI NOT IN (SELECT rxcui FROM candidates)
 """
 
 
+def rel(path: Path) -> Path:
+    try:
+        return path.relative_to(ROOT)
+    except ValueError:
+        return path
+
+
 def check(con: duckdb.DuckDBPyConnection, sql: str, message: str) -> None:
     if not con.execute(sql).fetchone()[0]:
         raise SystemExit(f"check failed: {message}")
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--salt", default=SPLIT_SALT, help=f"split hash salt (default: {SPLIT_SALT})")
+    ap.add_argument("--out-dir", type=Path, default=OUT_DIR,
+                    help="where the three parquet files go (default: data/processed)")
+    ap.add_argument("--force", action="store_true",
+                    help="allow a non-default salt to overwrite data/processed")
+    args = ap.parse_args(argv)
+    args.out_dir = args.out_dir.resolve()
+    # data/processed is the published split: every model, figure, and test reads
+    # it. A different salt there would silently change every downstream number.
+    if args.salt != SPLIT_SALT and args.out_dir == OUT_DIR.resolve() and not args.force:
+        raise SystemExit(f"refusing to write salt {args.salt!r} into {OUT_DIR.relative_to(ROOT)}: "
+                         "pass --out-dir <new directory> (or --force if you really mean it)")
+    return args
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    out_dir: Path = args.out_dir
     con = duckdb.connect(str(DB_PATH), read_only=True)
-    con.execute(BUILD)
+    con.execute(build_sql(args.salt))
 
     check(con, "SELECT count(*) = count(DISTINCT rxcui) FROM candidates",
           "each candidate appears once (no join fan-out)")
     check(con, "SELECT count(*) FILTER (WHERE split IS NULL OR dose_form IS NULL) = 0 FROM candidates",
           "every candidate has ingredients and a dose form")
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     for table in ("pairs", "candidates", "unmatched"):
-        path = OUT_DIR / f"{table}.parquet"
+        path = out_dir / f"{table}.parquet"
         con.execute(f"COPY (SELECT * FROM {table} ORDER BY ALL) TO '{path}' (FORMAT parquet)")
         n = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-        print(f"wrote {path.relative_to(ROOT)}  ({n:,} rows)")
+        print(f"wrote {rel(path)}  ({n:,} rows)")
+    # The directory describes its own split, so a dataset folder is never anonymous.
+    (out_dir / "split.json").write_text(json.dumps(
+        {"salt": args.salt, "test_pct": TEST_PCT, "val_pct": VAL_PCT, "rxnorm_release": RXNORM_RELEASE},
+        indent=2) + "\n")
 
     print("\nRows per split")
     con.sql("""

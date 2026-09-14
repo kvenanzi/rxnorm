@@ -53,8 +53,8 @@ Report: [live panels](https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-Rx
 data/          RxNorm release, rxnorm.duckdb, processed parquet (gitignored; never committed)
 docs/          write-up and figures; RxNorm / training / calibration / W&B primers
 rxnorm_vandf/  the package: data, evaluation, TF-IDF, training, calibration, strength rules, inference
-scripts/       numbered pipeline: load, checkpoint, build dataset, upload, baselines, train, calibrate, sweep, publish, report, figures
-notebooks/     Colab notebooks: train one model; run the sweep
+scripts/       numbered pipeline: load, checkpoint, build dataset, upload, baselines, train, calibrate, sweep, publish, report, figures, split seeds
+notebooks/     Colab notebooks: train one model; run the sweep; run the split-seed matrix
 sweeps/        W&B sweep definitions
 tests/         pytest unit tests
 models/        local training outputs (gitignored)
@@ -86,7 +86,12 @@ uv run scripts/08_sweep.py --create            # register the 18-run sweep; run 
 uv run scripts/09_publish_hf.py --dry-run      # stage the HF model + dataset repos (drop --dry-run to upload)
 uv run scripts/10_report.py                    # build the W&B Report from the runs
 uv run scripts/11_figures.py                   # figures for docs/post/
-uv run pytest                                  # unit tests (strength normalizer, inference wrapper)
+uv run pytest                                  # unit tests (strength normalizer, inference wrapper, split tooling)
+
+uv run scripts/12_split_seeds.py build         # five more ingredient splits under data/splits/ (data/processed untouched)
+uv run scripts/12_split_seeds.py tfidf         # TF-IDF on every split
+uv run scripts/12_split_seeds.py train         # the final recipe on 6 splits + 2 extra seeds (~20 min each locally)
+uv run scripts/12_split_seeds.py summarize     # mean / sd table -> outputs/split_seeds/
 ```
 
 ### Training in Colab
@@ -100,6 +105,12 @@ Artifact, so it never needs the RxNorm release.
 [`notebooks/02_sweep.ipynb`](notebooks/02_sweep.ipynb) runs a W&B agent for the
 sweep in `sweeps/grid.yaml` (encoder × negatives × strength normalizer, 18 runs,
 ~30 min on a T4). Register the sweep locally first with `08_sweep.py --create`.
+
+[`notebooks/03_split_seeds.ipynb`](notebooks/03_split_seeds.ipynb) runs the
+split-and-seed-variance matrix (`12_split_seeds.py train`, 8 runs, ~16 min on a
+T4). The splits come from a separate artifact, `vandf-rxnorm-splits`, logged
+locally with `12_split_seeds.py upload`; the published `vandf-rxnorm-pairs`
+artifact is never re-logged.
 
 ## Where things run
 
