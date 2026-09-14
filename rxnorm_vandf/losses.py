@@ -33,7 +33,9 @@ class MNRLWithStrengthHead(nn.Module):
         super().__init__()
         self.model = model
         self.scale = scale
-        dim = model.get_sentence_embedding_dimension()
+        # renamed in newer sentence-transformers; Colab may ship either
+        dim = getattr(model, "get_embedding_dimension", None) or model.get_sentence_embedding_dimension
+        dim = dim()
         # The head's random init must not shift the global RNG stream, so the
         # aux=off and aux=on arms of the same seed see the same batches.
         with torch.random.fork_rng(devices=[]):
