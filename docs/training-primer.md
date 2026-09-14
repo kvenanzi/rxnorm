@@ -61,6 +61,16 @@ answer: it goes down when the correct name outscores every other one in the batc
 | **fp16** | on GPU | Half-precision arithmetic: about 2× faster, same result for this purpose. |
 | **seed** | 42 | Fixes the random choices (negatives, batch order) so a run is repeatable. |
 
+The follow-up experiment (docs/post-2) adds four more, all off by default so the
+published recipe is unchanged:
+
+| Knob | Default | What it does |
+|---|---|---|
+| **train_sources** | `VANDF` | Which sources' train rows feed the triplets. A folder built with `--sources VANDF,MTHSPL` also carries the FDA label names; `VANDF,MTHSPL` trains on both. Val and test keys stay VA-only; the other source is scored under `val_mthspl` / `test_mthspl`. |
+| **max_extra_pairs** | none | Caps the non-VA rows (the size-matched control). |
+| **aux** | `none` | `strength`: a linear head on the anchor embedding must name the target's strength, weighted by `aux_weight`. The head lives in the loss, so the saved model and inference are unchanged. |
+| **log_predictions** | off | Writes every string's top-20 candidates and scores to `predictions.parquet` and logs it, for the k-fold pooling. |
+
 ## Train, validation, test: who decides what
 
 - **Train** rows are what the loss sees.

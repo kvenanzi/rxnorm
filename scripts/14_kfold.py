@@ -71,6 +71,10 @@ FINAL_RUN = "sapbert-ingredient-strength-final-all"
 TARGETS = {"p95": 0.95, "p99": 0.99}
 
 
+def rel(path: Path) -> Path:
+    return path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+
+
 def run_name(job: str) -> str:
     return f"{RUN_PREFIX}-{job}" if job != ALL else FINAL_RUN
 
@@ -166,7 +170,7 @@ def cmd_train(args: argparse.Namespace) -> None:
     done = {e["job"] for e in read_ledger() if e.get("state") == "finished"}
     for job in jobs:
         if job in done and not args.only:
-            print(f"{job}: finished earlier (see {LEDGER.relative_to(ROOT)}), skipping")
+            print(f"{job}: finished earlier (see {rel(LEDGER)}), skipping")
             continue
         cmd = [sys.executable, __file__, "_one", job, *forward_flags(args)]
         print(f"\n=== {job}: {' '.join(cmd[2:])}", flush=True)
@@ -315,7 +319,7 @@ def cmd_oof(args: argparse.Namespace) -> None:
     md = render_oof(payload)
     (OUT / "oof.md").write_text(md)
     print(md)
-    print(f"wrote {(OUT / 'oof.json').relative_to(ROOT)}, oof.md, oof.parquet")
+    print(f"wrote {rel(OUT / 'oof.json')}, oof.md, oof.parquet")
 
 
 def render_oof(p: dict) -> str:
@@ -416,7 +420,7 @@ def cmd_calibrate_oof(args: argparse.Namespace) -> None:
     if final_dir.exists():
         save_json(cal, final_dir / "calibration.json")
         print(f"also wrote {final_dir / 'calibration.json'}")
-    print(f"wrote {(OUT / 'calibration.json').relative_to(ROOT)}, calibration_oof.json, calibration.md")
+    print(f"wrote {rel(OUT / 'calibration.json')}, calibration_oof.json, calibration.md")
 
 
 def render_calibration(r: dict) -> str:

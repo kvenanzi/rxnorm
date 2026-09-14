@@ -189,10 +189,11 @@ def test_levers_analysis_main_effects_and_interaction():
             cells[(u, arm)] = {k: v for k in levers.METRICS} | {"test/n": 1, "val/n": 1, "test_mthspl/n": 1}
     st = levers.analyse(cells)
     main = st["main"]["test/acc@1"]
-    assert math.isclose(main["data"]["diffs"][("v1", 42)], ((0.92 - 0.90) + (0.94 - 0.91)) / 2)
-    assert math.isclose(main["head"]["diffs"][("v2", 42)], ((0.89 - 0.88) + (0.90 - 0.89)) / 2)
-    assert math.isclose(main["interaction"]["diffs"][("v1", 42)], 0.94 - 0.92 - 0.91 + 0.90)
-    assert st["units"] == [("v1", 42), ("v2", 42)]
+    assert math.isclose(main["data"]["diffs"]["v1/s42"], ((0.92 - 0.90) + (0.94 - 0.91)) / 2)
+    assert math.isclose(main["head"]["diffs"]["v2/s42"], ((0.89 - 0.88) + (0.90 - 0.89)) / 2)
+    assert math.isclose(main["interaction"]["diffs"]["v1/s42"], 0.94 - 0.92 - 0.91 + 0.90)
+    assert st["units"] == ["v1/s42", "v2/s42"]
+    json.dumps(st)                                     # every key is JSON-safe: summarize writes this
     assert levers.arm_of({"train_sources": ["VANDF", "MTHSPL"], "aux": "strength"}) == "both"
     assert levers.arm_of({"train_sources": "VANDF"}) == "base"
 

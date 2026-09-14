@@ -138,10 +138,16 @@ def fetch_cells(sweep_id: str) -> tuple[dict, dict]:
     return cells, ids
 
 
+def unit_key(unit: tuple) -> str:
+    """(split, seed) -> "v1/s42": a JSON-safe unit name used in every diffs dict."""
+    return f"{unit[0]}/s{unit[1]}"
+
+
 def analyse(cells: dict) -> dict:
     """Paired contrasts over (split, seed) units, the two main effects (the mean
     of the two simple contrasts per unit), and the interaction."""
-    have = {k: v for k, v in cells.items() if all(v.get(m) is not None for m in ("test/acc@1", "val/acc@1"))}
+    have = {(unit_key(u), a): v for (u, a), v in cells.items()
+            if all(v.get(m) is not None for m in ("test/acc@1", "val/acc@1"))}
     stats = {"simple": paired_stats(have, [m for m in METRICS if m not in ("val_mthspl/acc@1",)], CONTRASTS)}
     units = sorted({u for u, _ in have})
     full = [u for u in units if all((u, a) in have for a in ARMS.values())]
@@ -197,7 +203,7 @@ def cmd_summarize(args: argparse.Namespace) -> None:
     ctl = controls(cells, ctl_cells["steps"], ctl_cells["size"])
 
     payload = {"sweep_id": sweep_id, "control_sweep_ids": ctl_ids, "arms": {f"{s}|{a}": n for (s, a), n in ARMS.items()},
-               "cells": {f"{k}/s{s}/{a}": {**v, "run_id": ids[((k, s), a)][0]} for ((k, s), a), v in cells.items()},
+               "cells": {f"{unit_key(u)}/{a}": {**v, "run_id": ids[(u, a)][0]} for (u, a), v in cells.items()},
                "missing": missing, "stats": stats, "controls": ctl}
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "levers.json").write_text(json.dumps(payload, indent=2, default=str) + "\n")
@@ -220,7 +226,8 @@ def render_markdown(cells: dict, stats: dict, ctl: dict) -> str:
                 row.append("–" if c is None else f"{f3(c['test/acc@1'])} ({f3(c['val/acc@1'])})")
             for con in ("mthspl-base", "aux-base"):
                 dd = stats["simple"].get(con, {}).get("test/acc@1", {}).get("diffs", {})
-                row.append(f"{dd[(k, s)]:+.3f}" if (k, s) in dd else "–")
+                u = unit_key((k, s))
+                row.append(f"{dd[u]:+.3f}" if u in dd else "–")
             lines.append("| " + " | ".join(row) + " |")
     lines += ["", "| effect (paired over split × seed) | metric | units | mean | sd | 95% CI | units with + sign | paired t |",
               "|---|---|---|---|---|---|---|---|"]
