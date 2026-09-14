@@ -1,8 +1,9 @@
-# Make-up grid for sweeps/levers.yaml: the twelve aux=none cells on splits v3,
-# v4, v5 that failed in sweep nypttmi8 (a loader assertion on a few MTHSPL
-# strings whose targets span splits; fixed in rxnorm_vandf/data.py). A grid
-# sweep never re-issues a failed cell, so they are re-run here and merged by
-# `13_levers.py summarize --sweep nypttmi8 --sweep <this id>`.
+# Make-up grid for sweeps/levers.yaml: the aux=none cells on splits v3..v6 of
+# sweep nypttmi8. Twelve failed on a loader assertion (a few MTHSPL strings
+# whose targets span splits; fixed in rxnorm_vandf/data.py) and two v6 cells
+# were killed when the agent was stopped. A grid sweep never re-issues a
+# failed cell, so they run again here (16 cells; one, v6/seed 42/VANDF, is a
+# duplicate of a finished cell) and `13_levers.py summarize` merges the sweeps.
 name: levers-rerun
 method: grid
 metric:
@@ -18,7 +19,7 @@ parameters:
   dataset_artifact:
     value: vandf-rxnorm-multi:v0
   dataset_subdir:
-    values: [v3, v4, v5]
+    values: [v3, v4, v5, v6]
   train_sources:
     values: ["VANDF", "VANDF,MTHSPL"]
   aux:
