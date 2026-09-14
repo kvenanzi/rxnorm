@@ -16,7 +16,8 @@ import argparse
 import wandb
 import wandb_workspaces.reports.v2 as wr
 
-from rxnorm_vandf.wb import ENTITY, PROJECT, STORY_RUNS, SWEEP_ID, latest_calibrate_run, line_series, run
+from rxnorm_vandf.wb import (ENTITY, PROJECT, SPLIT_SEED_RUNS, STORY_RUNS, SWEEP_ID, latest_calibrate_run,
+                             line_series, run)
 
 TITLE = "VANDF → RxNorm: how far a small model gets at the clinical-drug level"
 DESCRIPTION = ("Mapping VA drug strings to full RxNorm clinical drugs (ingredient + strength + dose form) "
@@ -65,11 +66,15 @@ def build_report() -> wr.Report:
                       filters=ids_filter(STORY_RUNS.values()))
     trained = wr.Runset(entity=ENTITY, project=PROJECT, name="Trained models",
                         filters=ids_filter(STORY_RUNS[k] for k in TRAIN_RUNS))
-    # Booleans must be Python-style: a lowercase `false`/`true` is saved as the
-    # *string* "false"/"true", which matches no run and empties every panel.
+    # By sweep id: the split-seed runs also have log_model=False and smoke=False,
+    # and a config filter would pull them into the 18-run panels. (Booleans in
+    # these filters must be Python-style: a lowercase `false` is saved as the
+    # *string* "false", which matches no run and empties every panel.)
     sweep = wr.Runset(entity=ENTITY, project=PROJECT, name="Sweep (18 runs)",
-                      filters="Config('log_model') == False and Config('smoke') == False")
+                      filters=f"Metric('Sweep') == '{SWEEP_ID}'")
     curves = wr.Runset(entity=ENTITY, project=PROJECT, name="Curves", filters="Config('report_data') == True")
+    seeds = wr.Runset(entity=ENTITY, project=PROJECT, name="Split and seed variance (8 runs)",
+                      filters=ids_filter(SPLIT_SEED_RUNS.values()))
 
     W = 24  # panel grid width units
     blocks = [
@@ -92,7 +97,9 @@ def build_report() -> wr.Report:
             "| TF-IDF char n-grams | 0.509 | 0.820 | 0.617 | 0.698 |\n"
             "| MiniLM fine-tuned | 0.836 | 0.967 | 0.884 | 0.935 |\n"
             "| + strength normalizer | 0.886 | 0.975 | 0.941 | 0.943 |\n"
-            "| **SapBERT + negatives + normalizer** | **0.931** | **0.984** | 0.961 | 0.972 |"),
+            "| **SapBERT + negatives + normalizer** | **0.931** | **0.984** | 0.961 | 0.972 |\n\n"
+            "The final row is the published split; across six ingredient draws the same recipe scores "
+            "0.907 ± 0.019 (see *Split and seed variance* below)."),
         wr.PanelGrid(runsets=[story], panels=[
             wr.BarPlot(title="Test acc@1", metrics=["test/acc@1"], layout=wr.Layout(x=0, y=0, w=W // 2, h=8)),
             wr.BarPlot(title="Test recall@5", metrics=["test/recall@5"], layout=wr.Layout(x=W // 2, y=0, w=W // 2, h=8)),
@@ -134,6 +141,33 @@ def build_report() -> wr.Report:
                        groupby_aggfunc="mean", layout=wr.Layout(x=W // 2, y=10, w=W // 2, h=8)),
         ]),
 
+        wr.H1("Split and seed variance"),
+        wr.P("Every number above is one training run on one ingredient split. The final recipe was retrained on "
+             "six draws of the split (v1 is the published one; v2–v6 are new hash salts) at seed 42, and on the "
+             "published split at two more training seeds. Runs are named sapbert-ingredient-strength-split-v* and "
+             "-seed-*; the v1 × seed 42 run reproduced the published run to the third decimal."),
+        wr.MarkdownBlock(
+            "| Split | val acc@1 | test acc@1 | val − test | test recall@5 | TF-IDF test acc@1 |\n"
+            "|---|---|---|---|---|---|\n"
+            "| v1 (published) | 0.881 | **0.931** | −0.049 | 0.984 | 0.509 |\n"
+            "| v2 | 0.913 | 0.905 | +0.007 | 0.974 | 0.475 |\n"
+            "| v3 | 0.919 | 0.905 | +0.014 | 0.979 | 0.555 |\n"
+            "| v4 | 0.908 | 0.874 | +0.034 | 0.981 | 0.477 |\n"
+            "| v5 | 0.895 | 0.921 | −0.026 | 0.985 | 0.490 |\n"
+            "| v6 | 0.884 | 0.910 | −0.026 | 0.988 | 0.480 |\n"
+            "| **mean ± sd** | 0.900 ± 0.015 | **0.907 ± 0.019** | −0.007 ± 0.031 | 0.982 ± 0.005 | 0.498 ± 0.031 |\n"
+            "| v1, seeds 1 and 2 | 0.881, 0.880 | 0.930, 0.932 | | 0.984, 0.984 | |\n\n"
+            "The split moves test acc@1 by about two points (sampling alone predicts 0.007); the training seed "
+            "moves it by 0.001. The published draw is the most favorable of the six, and the validation-harder-than-"
+            "test gap seen on it flips sign on half of the re-draws. Recall@5 and the component accuracies barely move."),
+        wr.PanelGrid(runsets=[seeds], panels=[
+            wr.BarPlot(title="Test acc@1 by run", metrics=["test/acc@1"], layout=wr.Layout(x=0, y=0, w=W // 2, h=9)),
+            wr.BarPlot(title="Validation acc@1 by run", metrics=["val/acc@1"], layout=wr.Layout(x=W // 2, y=0, w=W // 2, h=9)),
+            wr.BarPlot(title="Test recall@5 by run", metrics=["test/recall@5"], layout=wr.Layout(x=0, y=9, w=W // 2, h=8)),
+            wr.LinePlot(title="Validation acc@1 by epoch", x="epoch", y=["val/acc@1"],
+                        layout=wr.Layout(x=W // 2, y=9, w=W // 2, h=8)),
+        ]),
+
         wr.H1("Calibration and abstention"),
         wr.P("A cosine score isn't a probability. Four confidence signals were compared: raw cosine, the top-1 − "
              "top-2 margin, a temperature-scaled softmax over the top-20, and a Platt (logistic) layer over all "
@@ -165,7 +199,8 @@ def build_report() -> wr.Report:
         wr.H1("Limitations"),
         wr.UnorderedList(items=[
             "Trained and evaluated on VA strings only; other systems' naming conventions are unmeasured.",
-            "Validation is a harder draw of ingredients than test for every method (0.883 vs 0.931 final); report both.",
+            "The headline 0.931 is the best of six ingredient draws; the same recipe averages 0.907 ± 0.019 across "
+            "them, so read it as a band of about two points. The sweep and the calibration were run on one split.",
             "The 99% precision target chosen on validation lands at 98.2–98.8% on test.",
             "RxNorm 2026-09-08; the candidate pool changes monthly.",
         ]),
