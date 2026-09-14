@@ -170,6 +170,10 @@ def test_strength_head_loss_owns_its_parameters():
     feats = [model.tokenize(["a 1 mg", "b 2 mg"]), model.tokenize(["a 1 mg", "b 2 mg"]), model.tokenize(["c 1 mg", "a 2 mg"])]
     out = loss(feats, torch.tensor([0, 2]))
     assert set(out) == {"mnrl", "strength"} and all(torch.isfinite(v) for v in out.values())
+    # the contrastive term is the library's MultipleNegativesRankingLoss, to the float
+    from sentence_transformers import losses
+    ref = losses.MultipleNegativesRankingLoss(model)(feats, None)
+    assert torch.isclose(out["mnrl"], ref, atol=1e-6), (out["mnrl"], ref)
     out2 = loss(feats, torch.tensor([IGNORE_LABEL, IGNORE_LABEL]))
     assert float(out2["strength"]) == 0.0 and torch.isfinite(out2["mnrl"])
     # same seed, same head; the head's init does not disturb the global stream
