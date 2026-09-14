@@ -1,0 +1,32 @@
+# Control for the MTHSPL arm of sweeps/levers.yaml: is it the extra optimizer
+# steps? VANDF only, 16 epochs (about the MTHSPL arm's step count), on the
+# best and worst draws of §5.8. 2 runs.
+# Register: uv run scripts/08_sweep.py --create --config sweeps/levers_control_steps.yaml
+name: levers-control-steps
+method: grid
+metric:
+  name: val/acc@1
+  goal: maximize
+parameters:
+  base_model:
+    value: cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+  negatives:
+    value: ingredient
+  normalize_strength:
+    value: true
+  dataset_artifact:
+    value: vandf-rxnorm-multi:v0
+  dataset_subdir:
+    values: [v1, v4]
+  train_sources:
+    value: "VANDF"
+  aux:
+    value: none
+  seed:
+    value: 42
+  epochs:
+    value: 16
+  batch_size:
+    value: 64
+  lr:
+    value: 2.0e-5

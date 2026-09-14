@@ -1,0 +1,42 @@
+# W&B Sweep: the two training levers, paired within split and seed, 48 runs.
+# Final recipe (SapBERT + ingredient negatives + normalizer) x
+#   train_sources  VANDF only, or VANDF plus the FDA label names (MTHSPL, license level 0)
+#   aux            no auxiliary loss, or a strength-classification head on the anchor
+#   dataset_subdir the six ingredient splits of the write-up's §5.8
+#   seed           42 and 1
+# Every run scores the VA val/test of its split (val/*, test/*, unchanged sets)
+# and the MTHSPL val/test rows (val_mthspl/*, test_mthspl/*), so the VANDF-only
+# arm's test_mthspl/acc@1 is the cross-source transfer number.
+# Register: uv run scripts/08_sweep.py --create --config sweeps/levers.yaml
+# Run:      notebooks/05_levers.ipynb (A100: ~2 min per VANDF run, ~8 per MTHSPL run)
+# Analyse:  uv run scripts/13_levers.py summarize --sweep <id>
+name: levers
+method: grid
+metric:
+  name: val/acc@1
+  goal: maximize
+parameters:
+  base_model:
+    value: cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+  negatives:
+    value: ingredient
+  normalize_strength:
+    value: true
+  dataset_artifact:
+    value: vandf-rxnorm-multi:v0      # data/multi/v1..v6, built with --sources VANDF,MTHSPL
+  dataset_subdir:
+    values: [v1, v2, v3, v4, v5, v6]
+  train_sources:
+    values: ["VANDF", "VANDF,MTHSPL"] # a comma string; TrainConfig splits it
+  aux:
+    values: [none, strength]
+  aux_weight:
+    value: 0.2
+  seed:
+    values: [42, 1]
+  epochs:
+    value: 4
+  batch_size:
+    value: 64
+  lr:
+    value: 2.0e-5                     # decimal form: YAML reads 2e-5 as a string

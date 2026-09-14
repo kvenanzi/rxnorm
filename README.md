@@ -94,6 +94,21 @@ uv run scripts/12_split_seeds.py train         # the final recipe on 6 splits + 
 uv run scripts/12_split_seeds.py summarize     # mean / sd table -> outputs/split_seeds/
 uv run scripts/08_sweep.py --create --config sweeps/negatives_by_split.yaml   # hard negatives x 6 splits; run in Colab (below)
 uv run scripts/12_split_seeds.py negatives     # paired analysis of that sweep
+
+# The follow-up (docs/post-2): the three levers of the first write-up's §7
+uv run scripts/13_levers.py build              # the six splits with the FDA label names (MTHSPL) alongside, under data/multi/
+uv run scripts/13_levers.py upload             # -> W&B artifact vandf-rxnorm-multi
+uv run scripts/08_sweep.py --create --config sweeps/levers.yaml                # MTHSPL data x strength head x 6 splits x 2 seeds (48 runs; Colab)
+uv run scripts/08_sweep.py --create --config sweeps/levers_control_steps.yaml  # two controls, 2 runs each (Colab)
+uv run scripts/08_sweep.py --create --config sweeps/levers_control_size.yaml
+uv run scripts/13_levers.py summarize          # paired main effects, interaction, controls -> outputs/levers/
+uv run scripts/14_kfold.py build               # seven folds by ingredient + the all-train folder, under data/kfold/
+uv run scripts/14_kfold.py upload              # -> W&B artifact vandf-rxnorm-kfold
+uv run scripts/14_kfold.py train [recipe]      # the seven fold models (Colab: notebooks/06_kfold.ipynb)
+uv run scripts/14_kfold.py final [recipe]      # the all-data model; weights logged as vandf-rxnorm-biencoder-final-all
+uv run scripts/14_kfold.py oof                 # pooled out-of-fold accuracy -> outputs/kfold/
+uv run scripts/14_kfold.py calibrate-oof       # calibration on out-of-fold predictions; threshold transfer across folds
+uv run scripts/11_figures.py --only levers --only kfold   # figures for docs/post-2/
 ```
 
 ### Training in Colab
@@ -118,17 +133,27 @@ artifact is never re-logged.
 the second sweep, `sweeps/negatives_by_split.yaml`: the hard-negative strategy on
 all six splits with SapBERT and the normalizer (18 runs, ~20 min on an A100).
 
+[`notebooks/05_levers.ipynb`](notebooks/05_levers.ipynb) runs the follow-up's
+main sweep, `sweeps/levers.yaml` (48 runs, about 4 hours on an A100), and its
+two control sweeps. [`notebooks/06_kfold.ipynb`](notebooks/06_kfold.ipynb) trains
+the seven fold models and the all-data model; that last run is the one Colab run
+that logs its weights, under the artifact name `vandf-rxnorm-biencoder-final-all`.
+Sweep and matrix runs log no model artifact by default (`log_model=False`); any
+run can persist its weights with `06_train.py --log-model --model-artifact <name>`,
+from Colab or locally, so keeping weights is a choice per run, not a hardware limit.
+
 ## Where things run
 
 | Work | Where | Why |
 |---|---|---|
 | Data prep, pair building, baselines | Local (uv venv) | CPU-only work; the 1.8 GB release and its restricted sources stay on one machine |
-| Bi-encoder training, sweeps | Local GTX 1070 or Google Colab (T4) | Same `train()` either way; Colab opens notebooks straight from this repo |
+| Bi-encoder training, sweeps | Local GTX 1070 or Google Colab (A100) | Same `train()` either way; Colab opens notebooks straight from this repo |
 | Handoff between the two | W&B Artifact | Versioned dataset: Colab pulls exactly the pairs file the local scripts produced |
 
 ## Data licensing
 
 The RxNorm full release bundles sources with extra license restrictions:
 SNOMED CT US (restriction level 9) and GS, MMX, and NDDF (level 3). This
-project uses only `VANDF` and `RXNORM`, both restriction level 0, and anything
-published (datasets, models, reports) is derived from those two sources alone.
+project uses only `VANDF`, `RXNORM`, and (in the follow-up experiment) `MTHSPL`,
+the FDA Structured Product Label names, all restriction level 0, and anything
+published (datasets, models, reports) is derived from those sources alone.

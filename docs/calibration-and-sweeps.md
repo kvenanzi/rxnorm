@@ -114,7 +114,11 @@ share the same grid.
   this trial's parameters from `wandb.config`". Everything else is identical to
   a normal run, so sweep runs and hand-launched runs sit in the same runs table.
 - Sweep runs don't log a model artifact (`log_model=False`). The winner is
-  retrained once, with the artifact, and calibrated.
+  retrained once, with the artifact, and calibrated. That is a storage policy,
+  not a hardware one: any run, local or Colab, keeps its weights with
+  `--log-model --model-artifact <name>` (a sweep YAML can set the same two
+  fields), and the k-fold all-data model of the follow-up is logged from Colab
+  under its own artifact name so `vandf-rxnorm-biencoder:latest` never moves.
 
 ### Reading the sweep page
 

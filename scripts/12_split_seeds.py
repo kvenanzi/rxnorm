@@ -25,7 +25,6 @@ In Colab (notebooks/03_split_seeds.ipynb):  python scripts/12_split_seeds.py tra
 
 import argparse
 import json
-import math
 import os
 import shutil
 import subprocess
@@ -164,6 +163,8 @@ def cmd_train(args: argparse.Namespace) -> None:
                 cmd.append(f"--{flag}")
         if args.from_artifact:
             cmd += ["--from-artifact", args.from_artifact]
+        if args.log_model:
+            cmd += ["--log-model", "--model-artifact", args.model_artifact]
         print(f"\n=== {job}: {' '.join(cmd[2:])}", flush=True)
         proc = subprocess.run(cmd, cwd=ROOT)
         if proc.returncode != 0:
@@ -179,7 +180,8 @@ def cmd_one(args: argparse.Namespace) -> None:
     if args.offline:
         os.environ["WANDB_MODE"] = "offline"
     name = run_name(args.job) + ("-smoke" if args.smoke else "")
-    cfg = TrainConfig(**FINAL, seed=seed, smoke=args.smoke, log_model=False,
+    cfg = TrainConfig(**FINAL, seed=seed, smoke=args.smoke, log_model=args.log_model,
+                      model_artifact=args.model_artifact,
                       output_dir=str(MODELS_DIR / "smoke" if args.smoke else MODELS_DIR),
                       run_name=name, group=GROUP,
                       tags=[GROUP, f"split-{key}", f"seed-{seed}"])
@@ -215,19 +217,7 @@ def append_ledger(entry: dict) -> None:
 
 # --------------------------------------------------------------------- summarize
 
-def describe(values: list[float], ns: list[int] | None = None) -> dict[str, float]:
-    """Mean, sample sd, range; and, given the test sizes, the between-draw sd
-    left after subtracting the binomial sampling variance p(1-p)/n."""
-    k = len(values)
-    mean = sum(values) / k
-    var = sum((v - mean) ** 2 for v in values) / (k - 1) if k > 1 else 0.0
-    out = {"n_runs": k, "mean": mean, "sd": math.sqrt(var), "min": min(values), "max": max(values),
-           "range": max(values) - min(values)}
-    if ns:
-        sampling_var = sum(v * (1 - v) / n for v, n in zip(values, ns)) / k
-        out["sampling_sd"] = math.sqrt(sampling_var)
-        out["excess_sd"] = math.sqrt(max(var - sampling_var, 0.0))
-    return out
+from rxnorm_vandf.stats import T_975, describe   # noqa: E402  (shared with 13_levers.py, 14_kfold.py)
 
 
 def fetch_runs() -> dict[str, dict]:
@@ -323,9 +313,6 @@ def render_markdown(rows: list[dict], stats: dict, published: dict) -> str:
 NEGATIVE_LEVELS = ["ingredient", "tfidf", "none"]
 CONTRASTS = [("ingredient", "none"), ("tfidf", "none"), ("ingredient", "tfidf")]
 PAIRED_METRICS = ["test/acc@1", "val/acc@1", "test/recall@5"]
-# t_{0.975, df} for the paired interval; n is small and fixed, so no scipy import
-# (tests execute this module at import).
-T_975 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262}
 
 
 def paired_stats(cells: dict[tuple[str, str], dict[str, float]],
@@ -334,23 +321,8 @@ def paired_stats(cells: dict[tuple[str, str], dict[str, float]],
     (split, negatives) -> metrics. For each contrast and metric: the per-split
     differences, mean, sd, standard error, a 95% t interval, and how many
     splits have the expected (positive) sign."""
-    splits = sorted({s for s, _ in cells})
-    out: dict[str, dict[str, dict]] = {}
-    for a, b in CONTRASTS:
-        for m in metrics:
-            diffs = {s: cells[(s, a)][m] - cells[(s, b)][m]
-                     for s in splits if (s, a) in cells and (s, b) in cells}
-            if not diffs:
-                continue
-            vals = list(diffs.values())
-            d = describe(vals)
-            k = len(vals)
-            se = d["sd"] / math.sqrt(k) if k > 1 else None
-            t = T_975.get(k - 1)
-            d.update({"se": se, "ci95": [d["mean"] - t * se, d["mean"] + t * se] if se is not None and t else None,
-                      "t": d["mean"] / se if se else None, "n_pos": sum(v > 0 for v in vals), "diffs": diffs})
-            out.setdefault(f"{a}-{b}", {})[m] = d
-    return out
+    from rxnorm_vandf.stats import paired_stats as _paired
+    return _paired(cells, metrics, CONTRASTS)
 
 
 def cmd_negatives(args: argparse.Namespace) -> None:
@@ -449,6 +421,9 @@ def main() -> None:
         p.add_argument("--offline", action="store_true", help="WANDB_MODE=offline")
         p.add_argument("--from-artifact", nargs="?", const=f"{ARTIFACT}:v0", default=None, metavar="NAME:VERSION",
                        help=f"Colab: download the splits from W&B (default {ARTIFACT}:v0)")
+        p.add_argument("--log-model", action="store_true", help="log the best checkpoint as a model artifact")
+        p.add_argument("--model-artifact", default="vandf-rxnorm-biencoder-split-seeds",
+                       help="artifact name for --log-model (never the published vandf-rxnorm-biencoder)")
         p.set_defaults(fn=fn)
     args = ap.parse_args()
     args.fn(args)

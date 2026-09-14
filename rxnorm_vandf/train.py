@@ -8,6 +8,7 @@ run is directly comparable with the baselines in the W&B runs table.
 import json
 import os
 import random
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -15,10 +16,13 @@ import numpy as np
 import torch
 
 from . import DATASET_ARTIFACT, MODEL_ARTIFACT, WANDB_PROJECT
-from .data import Data, load_data, normalize
+from .data import PRIMARY_SOURCE, Data, load_data, normalize
 from .eval import TOP_K, Retrieval, evaluate, evaluate_splits, log_results, print_summary
 from .strength import normalize_strength
 from .tfidf import tfidf_retrieve
+
+PREDICTIONS_ARTIFACT = "vandf-rxnorm-predictions"
+PREDICTIONS_TOP_K = 20
 
 
 @dataclass
@@ -48,12 +52,36 @@ class TrainConfig:
     # download when it is not), and an optional folder inside it.
     dataset_artifact: str = f"{DATASET_ARTIFACT}:latest"
     dataset_subdir: str | None = None
+    # --- the follow-up experiment (all defaults reproduce the published recipe) ---
+    # Which sources' train-split strings feed the triplets. A folder built with
+    # --sources VANDF,MTHSPL carries both; "VANDF" trains on the VA strings only.
+    # A comma-joined string (argparse, W&B grids) is accepted and normalized.
+    train_sources: tuple[str, ...] = (PRIMARY_SOURCE,)
+    max_extra_pairs: int | None = None    # cap on train rows per non-VANDF source (size-matched arm)
+    aux: str = "none"                     # "strength": classifier head on the anchor, see losses.py
+    aux_weight: float = 0.2
+    aux_min_count: int = 5                # strengths rarer than this in train get no head loss
+    log_predictions: bool = False         # write predictions.parquet (top-20 per query) and log it
+    model_artifact: str = MODEL_ARTIFACT  # name of the model artifact when log_model is on
+
+    def __post_init__(self) -> None:
+        srcs = self.train_sources
+        if isinstance(srcs, str):
+            srcs = srcs.split(",")
+        self.train_sources = tuple(s.strip().upper() for s in srcs if s.strip())
+        if self.max_extra_pairs is not None:
+            self.max_extra_pairs = int(self.max_extra_pairs)
 
 
 def auto_name(cfg: "TrainConfig") -> str:
     return (f"{cfg.base_model.split('/')[-1].lower()}-{cfg.negatives}"
             + ("-strength" if cfg.normalize_strength else "")
-            + (f"-{cfg.dataset_subdir}" if cfg.dataset_subdir else "")
+            + "".join(f"-{s.lower()}" for s in cfg.train_sources if s != PRIMARY_SOURCE)
+            + (f"-cap{cfg.max_extra_pairs}" if cfg.max_extra_pairs is not None else "")
+            + (f"-aux-{cfg.aux}" if cfg.aux != "none" else "")
+            + (f"-e{cfg.epochs}" if cfg.epochs != 4 else "")
+            + (f"-{cfg.dataset_subdir.replace('/', '-')}" if cfg.dataset_subdir else "")
+            + (f"-s{cfg.seed}" if cfg.seed != 42 else "")
             + ("-smoke" if cfg.smoke else ""))
 
 
@@ -67,13 +95,28 @@ def preprocess(s: str, cfg: "TrainConfig", query: bool) -> str:
 
 # ------------------------------------------------------------------ training data
 
-def build_triplets(data: Data, cfg: TrainConfig, rng: random.Random) -> dict[str, list[str]]:
+def training_rows(data: Data, cfg: TrainConfig, rng: random.Random) -> np.ndarray:
+    """Query ids that feed the triplets: the train split of every source in
+    cfg.train_sources, non-VA sources capped by max_extra_pairs."""
+    parts = []
+    for src in cfg.train_sources:
+        rows = data.rows("train", src)
+        if src != PRIMARY_SOURCE and cfg.max_extra_pairs is not None and len(rows) > cfg.max_extra_pairs:
+            rows = np.array(sorted(rng.sample(rows.tolist(), cfg.max_extra_pairs)), dtype=np.int64)
+        parts.append(rows)
+    return np.concatenate(parts).astype(np.int64) if parts else np.array([], dtype=np.int64)
+
+
+def build_triplets(data: Data, cfg: TrainConfig, rng: random.Random) -> tuple[dict[str, list], dict]:
     """Training rows: anchor (VA string), positive (its RxNorm name), and, unless
-    negatives == 'none', one hard negative drawn only from train-split candidates."""
+    negatives == 'none', one hard negative drawn only from train-split candidates.
+    With aux == 'strength', also an integer `label`: the positive's strength
+    class (or -100 when that strength is too rare to be a class). Returns the
+    columns and a small info dict (row counts, label vocabulary size)."""
     text = lambda s: preprocess(s, cfg, query=False)
-    rows = data.rows("train")
+    rows = training_rows(data, cfg, rng)
     if cfg.smoke:
-        rows = rows[:256]
+        rows = rows[::max(1, len(rows) // 256)][:256]     # spread over the sources, not the first 256
 
     train_ids = np.flatnonzero(data.cand["split"].values == "train")
     train_pool = set(train_ids.tolist())
@@ -84,7 +127,7 @@ def build_triplets(data: Data, cfg: TrainConfig, rng: random.Random) -> dict[str
     for i in train_ids:
         by_ingredients.setdefault(data.cand_key[i][0], []).append(int(i))
 
-    anchors, positives, negatives = [], [], []
+    anchors, positives, negatives, pos_ids = [], [], [], []
     tfidf_hits = None
     if cfg.negatives in ("tfidf", "ingredient"):
         # TF-IDF over the train pool: the primary miner for 'tfidf', the fallback
@@ -97,6 +140,7 @@ def build_triplets(data: Data, cfg: TrainConfig, rng: random.Random) -> dict[str
     for k, q in enumerate(rows):
         valid = data.valid[q]
         pos = rng.choice(sorted(valid))
+        pos_ids.append(pos)
         anchors.append(preprocess(data.queries["vandf_string"][q], cfg, query=True))
         positives.append(text(names[pos]))
         if cfg.negatives == "none":
@@ -112,13 +156,27 @@ def build_triplets(data: Data, cfg: TrainConfig, rng: random.Random) -> dict[str
             n_fallback += cfg.negatives == "ingredient"
         negatives.append(text(names[neg]))
 
-    out = {"anchor": anchors, "positive": positives}
+    out: dict[str, list] = {"anchor": anchors, "positive": positives}
     if negatives:
         out["negative"] = negatives
+    info = {"n_train_rows": len(anchors), "n_fallback": n_fallback,
+            **{f"n_train_rows_{s.lower()}": int(sum(data.queries["source"][q] == s for q in rows))
+               for s in cfg.train_sources}}
+    if cfg.aux == "strength":
+        # Classes are the strengths of the chosen positives; rare ones are ignored
+        # (-100) rather than lumped into an OTHER class that would teach nothing.
+        strengths = [data.cand_key[p][1] for p in pos_ids]
+        counts = Counter(strengths)
+        vocab = {s: i for i, s in enumerate(sorted(s for s, c in counts.items() if c >= cfg.aux_min_count and s))}
+        out["label"] = [vocab.get(s, -100) for s in strengths]
+        info["aux/num_labels"] = len(vocab)
+        info["aux/label_coverage"] = float(np.mean([l >= 0 for l in out["label"]])) if out["label"] else 0.0
     print(f"{len(anchors):,} training triplets; negatives={cfg.negatives}"
-          + (f" ({n_fallback:,} fell back to tfidf)" if cfg.negatives == "ingredient" else ""))
+          + (f" ({n_fallback:,} fell back to tfidf)" if cfg.negatives == "ingredient" else "")
+          + (f"; strength head: {info['aux/num_labels']} classes cover {info['aux/label_coverage']:.1%} of rows"
+             if cfg.aux == "strength" else ""))
     print(f"example anchor: {anchors[0]!r}")
-    return out
+    return out, info
 
 
 # --------------------------------------------------------------------- retrieval
@@ -161,6 +219,39 @@ def retrieve(model, data: Data, cfg: TrainConfig, rows: np.ndarray | None = None
     return Retrieval(top, scores)
 
 
+def write_predictions(model, data: Data, cfg: TrainConfig, data_dir: Path, path: Path,
+                      top_k: int = PREDICTIONS_TOP_K) -> "pd.DataFrame":
+    """Every query's top-k, plus the unmatched val/test strings, as one parquet:
+    what the k-fold experiment needs to pool out-of-fold predictions and to
+    calibrate on them (scripts/14_kfold.py)."""
+    import pandas as pd
+
+    cand_emb = encode(model, data.cand["name"].tolist(), cfg, query=False)
+    ret = retrieve(model, data, cfg, top_k=top_k, cand_emb=cand_emb)
+    rxcui = data.cand["rxcui"].to_numpy()
+    frames = [pd.DataFrame({
+        "kind": "matched", "source": data.queries["source"], "split": data.queries["split"],
+        "string": data.queries["vandf_string"],
+        "truth_rxcuis": [sorted(rxcui[t] for t in v) for v in data.valid],
+        "rxnorm_tty": None,
+        "top_rxcuis": [list(rxcui[r]) for r in ret.top], "scores": [list(map(float, s)) for s in ret.scores]})]
+    unmatched_path = data_dir / "unmatched.parquet"
+    if unmatched_path.exists():
+        um = pd.read_parquet(unmatched_path)
+        if "source" not in um.columns:
+            um["source"] = PRIMARY_SOURCE
+        um = um[um["split"].isin(["val", "test"])].reset_index(drop=True)
+        if len(um):
+            r = retrieve_texts(model, data, um["vandf_string"].tolist(), cfg, top_k, cand_emb)
+            frames.append(pd.DataFrame({
+                "kind": "unmatched", "source": um["source"], "split": um["split"], "string": um["vandf_string"],
+                "truth_rxcuis": [[] for _ in range(len(um))], "rxnorm_tty": um["rxnorm_tty"],
+                "top_rxcuis": [list(rxcui[x]) for x in r.top], "scores": [list(map(float, s)) for s in r.scores]}))
+    df = pd.concat(frames, ignore_index=True)
+    df.to_parquet(path, index=False)
+    return df
+
+
 # ---------------------------------------------------------------------- training
 
 def train(cfg: TrainConfig, sweep: bool = False) -> Path:
@@ -180,6 +271,7 @@ def train(cfg: TrainConfig, sweep: bool = False) -> Path:
         for k, v in dict(wandb.config).items():
             if hasattr(cfg, k):
                 setattr(cfg, k, v)
+        cfg.__post_init__()                      # a grid passes train_sources as a string
         run.name = cfg.run_name or auto_name(cfg)
         run.config.update(asdict(cfg), allow_val_change=True)
     else:
@@ -201,17 +293,31 @@ def train(cfg: TrainConfig, sweep: bool = False) -> Path:
     data = load_data(data_dir)
     split_meta = data_dir / "split.json"     # written by 03_build_dataset.py; absent in older folders
     if split_meta.exists():
-        run.config.update({"split_salt": json.loads(split_meta.read_text())["salt"]}, allow_val_change=True)
-    print(f"{len(data.queries):,} VA strings, {len(data.cand):,} candidates; "
+        meta = json.loads(split_meta.read_text())
+        run.config.update({"split_salt": meta["salt"], **{f"split_{k}": meta[k] for k in ("kfold", "fold", "sources")
+                                                          if k in meta}}, allow_val_change=True)
+    missing = [s for s in cfg.train_sources if s not in data.sources]
+    if missing:
+        raise ValueError(f"train_sources {missing} not in this dataset folder (has {list(data.sources)})")
+    print(f"{len(data.queries):,} query strings from {list(data.sources)}, {len(data.cand):,} candidates; "
           f"device={'cuda' if torch.cuda.is_available() else 'cpu'}")
 
-    train_ds = Dataset.from_dict(build_triplets(data, cfg, rng))
+    columns, info = build_triplets(data, cfg, rng)
+    train_ds = Dataset.from_dict(columns)
+    run.summary.update(info)
 
     model = SentenceTransformer(cfg.base_model)
     model.max_seq_length = cfg.max_seq_length
-    # Each anchor is scored against its own positive, its hard negative, and every
-    # other row's positive and negative in the batch; cross-entropy over those.
-    loss = losses.MultipleNegativesRankingLoss(model)
+    if cfg.aux == "strength":
+        from .losses import MNRLWithStrengthHead
+        loss = MNRLWithStrengthHead(model, num_labels=max(info["aux/num_labels"], 1),
+                                    aux_weight=cfg.aux_weight, seed=cfg.seed)
+    elif cfg.aux == "none":
+        # Each anchor is scored against its own positive, its hard negative, and every
+        # other row's positive and negative in the batch; cross-entropy over those.
+        loss = losses.MultipleNegativesRankingLoss(model)
+    else:
+        raise ValueError(f"unknown aux {cfg.aux!r}")
 
     out_dir = Path(cfg.output_dir) / run.name
     best_dir = out_dir / "best"
@@ -220,6 +326,11 @@ def train(cfg: TrainConfig, sweep: bool = False) -> Path:
         val_rows = val_rows[:200]
     wandb.define_metric("epoch")
     wandb.define_metric("val/*", step_metric="epoch")
+
+    def save_best() -> None:
+        model.save(str(best_dir))
+        # Inference must preprocess queries the way training did.
+        (best_dir / "train_config.json").write_text(json.dumps(asdict(cfg), indent=2))
 
     class ValEval(TrainerCallback):
         """After each epoch: full-pool retrieval on val, log it, keep the best model."""
@@ -233,9 +344,8 @@ def train(cfg: TrainConfig, sweep: bool = False) -> Path:
             print(f"epoch {state.epoch:.0f}: val acc@1 {m['acc@1']:.3f}  recall@5 {m['recall@5']:.3f}")
             if m["acc@1"] > self.best:
                 self.best = m["acc@1"]
-                model.save(str(best_dir))
-                # Inference must preprocess queries the way training did.
-                (best_dir / "train_config.json").write_text(json.dumps(asdict(cfg), indent=2))
+                run.summary["best_epoch"] = int(round(state.epoch))
+                save_best()
 
     import transformers
     # transformers v5 expresses a warmup *ratio* as a float warmup_steps; v4 (Colab
@@ -259,9 +369,15 @@ def train(cfg: TrainConfig, sweep: bool = False) -> Path:
         seed=cfg.seed,
         dataloader_drop_last=True,
     )
+    # No validation split (the k-fold all-train folder): train the fixed number
+    # of epochs and keep the last one.
+    callbacks = [ValEval()] if len(val_rows) else []
     trainer = SentenceTransformerTrainer(model=model, args=args, train_dataset=train_ds,
-                                         loss=loss, callbacks=[ValEval()])
+                                         loss=loss, callbacks=callbacks)
     trainer.train()
+    if not callbacks:
+        run.summary["best_epoch"] = int(args.num_train_epochs)
+        save_best()
 
     # Final evaluation with the best epoch, logged exactly like the baselines.
     best = SentenceTransformer(str(best_dir))
@@ -271,10 +387,19 @@ def train(cfg: TrainConfig, sweep: bool = False) -> Path:
     log_results(run, run.name, data, ret, results)
     print_summary(run.name, results)
 
+    if cfg.log_predictions:
+        path = out_dir / "predictions.parquet"
+        df = write_predictions(best, data, cfg, data_dir, path)
+        print(f"wrote {path} ({len(df):,} rows)")
+        art = wandb.Artifact(PREDICTIONS_ARTIFACT, type="predictions",
+                             metadata={"run_id": run.id, "run_name": run.name, **asdict(cfg),
+                                       **{f"split_{k}": v for k, v in run.config.items() if k.startswith("split_")}})
+        art.add_file(str(path))
+        run.log_artifact(art)
     if cfg.log_model:
-        artifact = wandb.Artifact(MODEL_ARTIFACT, type="model", metadata={
-            **asdict(cfg), "test/acc@1": results["test"]["metrics"]["acc@1"],
-            "test/recall@5": results["test"]["metrics"]["recall@5"]})
+        test = results.get("test", {}).get("metrics", {})
+        artifact = wandb.Artifact(cfg.model_artifact, type="model", metadata={
+            **asdict(cfg), "test/acc@1": test.get("acc@1"), "test/recall@5": test.get("recall@5")})
         artifact.add_dir(str(best_dir))
         run.log_artifact(artifact)
     run.finish()

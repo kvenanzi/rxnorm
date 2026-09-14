@@ -20,6 +20,7 @@ from rxnorm_vandf.wb import STORY_RUNS, SWEEP_ID, api, latest_calibrate_run, lin
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "post" / "figures"
+OUT2 = ROOT / "docs" / "post-2" / "figures"     # the follow-up (levers, k-fold)
 
 # Palette: categorical slots in fixed order (blue, orange, aqua, yellow), light surface.
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
@@ -302,6 +303,94 @@ def fig_negatives_by_split() -> dict:
     return {"cells": cells, "stats": neg["stats"], "replication": neg["replication"], "missing": neg["missing"]}
 
 
+def fig_levers() -> dict:
+    """The 2 x 2 of the levers sweep (outputs/levers/levers.json): test acc@1 per
+    arm for every (split, seed) unit, and the paired main effects with their
+    95% intervals."""
+    payload = json.loads((ROOT / "outputs" / "levers" / "levers.json").read_text())
+    arms = ["base", "mthspl", "aux", "both"]
+    labels = {"base": "VANDF only", "mthspl": "+ MTHSPL", "aux": "+ strength head", "both": "both"}
+    cells = payload["cells"]
+    units = sorted({tuple(k.split("/")[:2]) for k in cells})       # (split, seed)
+    fig, axes = plt.subplots(1, 3, figsize=(11, 3.8), gridspec_kw={"width_ratios": [2.2, 2.2, 1.6]})
+    for ax, metric, title in zip(axes[:2], ("test/acc@1", "test/strength_acc"),
+                                 ("Test acc@1 by arm", "Test strength accuracy by arm")):
+        for i, arm in enumerate(arms):
+            ys = [cells.get(f"{u[0]}/{u[1]}/{arm}", {}).get(metric) for u in units]
+            xs = [j + (i - 1.5) * 0.18 for j in range(len(units))]
+            ax.scatter(xs, ys, s=22, color=SERIES[i], label=labels[arm], zorder=3)
+        ax.set_xticks(range(len(units)), [f"{u[0]}\n{u[1]}" for u in units], fontsize=8)
+        ax.set_title(title, loc="left", color=INK, fontsize=11)
+        style(ax, xgrid=False)
+        ax.yaxis.grid(True, color=GRID, linewidth=0.8); ax.set_axisbelow(True)
+    axes[0].legend(frameon=False, fontsize=8, loc="lower left", ncol=2)
+    ax = axes[2]
+    main = payload["stats"].get("main", {})
+    names = [("data", "MTHSPL data"), ("head", "strength head"), ("interaction", "interaction")]
+    ys = np.arange(len(names))
+    for k, (key, label) in enumerate(names):
+        d = main.get("test/acc@1", {}).get(key)
+        if not d:
+            continue
+        lo, hi = d["ci95"] if d.get("ci95") else (d["mean"], d["mean"])
+        ax.plot([lo, hi], [k, k], color=SERIES[k], linewidth=2)
+        ax.scatter([d["mean"]], [k], color=SERIES[k], s=40, zorder=3)
+        ax.scatter(list(d["diffs"].values()), [k + 0.22] * len(d["diffs"]), color=SERIES[k], s=10, alpha=0.5)
+    ax.axvline(0, color=BASELINE, linewidth=1)
+    ax.set_yticks(ys, [l for _, l in names])
+    ax.invert_yaxis()
+    ax.set_xlabel("paired effect on test acc@1 (95% CI)")
+    ax.set_title("Main effects", loc="left", color=INK, fontsize=11)
+    style(ax)
+    fig.savefig(OUT2 / "levers.png")
+    plt.close(fig)
+    return {"units": units, "arms": arms,
+            "cells": {k: {m: v.get(m) for m in ("test/acc@1", "val/acc@1", "test/strength_acc", "test_mthspl/acc@1")}
+                      for k, v in cells.items()},
+            "main": {m: {k: {kk: d[kk] for kk in ("mean", "sd", "ci95", "n_pos", "n_runs")} for k, d in per.items()}
+                     for m, per in main.items()}}
+
+
+def fig_kfold() -> dict:
+    """Per-fold test acc@1 with the pooled out-of-fold estimate (outputs/kfold/oof.json),
+    and the leave-one-fold-out precision of the 99% threshold (calibration_oof.json)."""
+    oof = json.loads((ROOT / "outputs" / "kfold" / "oof.json").read_text())
+    cal_path = ROOT / "outputs" / "kfold" / "calibration_oof.json"
+    cal = json.loads(cal_path.read_text()) if cal_path.exists() else None
+    folds = list(oof["folds"])
+    fig, axes = plt.subplots(1, 2 if cal else 1, figsize=(9.5 if cal else 5.5, 3.6))
+    ax = axes[0] if cal else axes
+    acc = [oof["folds"][f]["test/acc@1"] for f in folds]
+    ns = [oof["folds"][f]["test/n"] for f in folds]
+    ax.bar(range(len(folds)), acc, color=SERIES[0], width=0.6)
+    lo, hi = oof["oof"]["wilson95"]
+    ax.axhspan(lo, hi, color=SERIES[1], alpha=0.15, linewidth=0)
+    ax.axhline(oof["oof"]["acc@1"], color=SERIES[1], linewidth=1.2, label=f"pooled out-of-fold {oof['oof']['acc@1']:.3f}")
+    for i, (a, n) in enumerate(zip(acc, ns)):
+        ax.text(i, a + 0.004, f"{a:.3f}\nn={n:,}", ha="center", fontsize=7, color=INK2)
+    ax.set_xticks(range(len(folds)), [f.replace("fold", "fold ") + ("\n(published test)" if f == "fold0" else "") for f in folds], fontsize=8)
+    ax.set_ylim(min(acc) - 0.04, max(acc) + 0.03)
+    ax.set_title("Test acc@1 per fold", loc="left", color=INK, fontsize=11)
+    ax.legend(frameon=False, fontsize=8, loc="lower right")
+    style(ax, xgrid=False)
+    out = {"folds": folds, "acc@1": acc, "n": ns, "oof": oof["oof"]}
+    if cal:
+        ax = axes[1]
+        for k, (key, color) in enumerate((("p99", SERIES[0]), ("p95", SERIES[1]))):
+            l = cal["leave_one_fold_out"][key]
+            prec = [l[f]["precision"] for f in folds]
+            ax.plot(range(len(folds)), prec, marker="o", color=color, label=f"{key[1:]}% target, threshold chosen on the other six folds")
+            ax.axhline(int(key[1:]) / 100, color=color, linewidth=0.8, linestyle=":")
+            out[f"lofo_{key}"] = prec
+        ax.set_xticks(range(len(folds)), [f.replace("fold", "fold ") for f in folds], fontsize=8)
+        ax.set_title("Precision of the transferred threshold (+hard)", loc="left", color=INK, fontsize=11)
+        ax.legend(frameon=False, fontsize=8, loc="lower left")
+        style(ax, xgrid=False)
+    fig.savefig(OUT2 / "kfold.png")
+    plt.close(fig)
+    return out
+
+
 FIGURES = {
     "progression": lambda: fig_progression({name: dict(run(rid).summary) for name, rid in STORY_RUNS.items()}),
     "sweep_effects": fig_sweep_effects,
@@ -309,7 +398,11 @@ FIGURES = {
     "error_taxonomy": fig_error_taxonomy,
     "split_seeds": fig_split_seeds,
     "negatives_by_split": fig_negatives_by_split,
+    # the follow-up (docs/post-2/figures); run with --only levers --only kfold
+    "levers": fig_levers,
+    "kfold": fig_kfold,
 }
+FOLLOW_UP = {"levers", "kfold"}
 
 
 def main() -> None:
@@ -317,14 +410,19 @@ def main() -> None:
     ap.add_argument("--only", choices=list(FIGURES), action="append",
                     help="build only these figures; their keys are merged into the existing data.json")
     args = ap.parse_args()
-    OUT.mkdir(parents=True, exist_ok=True)
-    names = args.only or list(FIGURES)
-    data_path = OUT / "data.json"
-    payload = json.loads(data_path.read_text()) if args.only and data_path.exists() else {}
-    for name in names:
-        payload[name] = FIGURES[name]()
-        print("wrote", (OUT / f"{name}.png").relative_to(ROOT))
-    data_path.write_text(json.dumps(payload, indent=2, default=float))
+    # Without --only: every figure of the first write-up. The follow-up's figures
+    # go to docs/post-2/figures with their own data.json, and are built on request.
+    names = args.only or [n for n in FIGURES if n not in FOLLOW_UP]
+    for out, group in ((OUT, [n for n in names if n not in FOLLOW_UP]), (OUT2, [n for n in names if n in FOLLOW_UP])):
+        if not group:
+            continue
+        out.mkdir(parents=True, exist_ok=True)
+        data_path = out / "data.json"
+        payload = json.loads(data_path.read_text()) if args.only and data_path.exists() else {}
+        for name in group:
+            payload[name] = FIGURES[name]()
+            print("wrote", (out / f"{name}.png").relative_to(ROOT))
+        data_path.write_text(json.dumps(payload, indent=2, default=float))
 
 
 if __name__ == "__main__":

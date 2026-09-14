@@ -1,0 +1,18 @@
+{
+  "base_model": "cambridgeltl/SapBERT-from-PubMedBERT-fulltext",
+  "epochs": 4,
+  "batch_size": 64,
+  "lr": 2e-05,
+  "warmup_ratio": 0.1,
+  "max_seq_length": 96,
+  "negatives": "ingredient",
+  "normalize_text": true,
+  "normalize_strength": true,
+  "log_model": true,
+  "seed": 42,
+  "smoke": false,
+  "data_dir": null,
+  "output_dir": "models",
+  "run_name": "sapbert-ingredient-strength-final",
+  "tags": []
+}

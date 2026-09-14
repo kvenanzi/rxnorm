@@ -20,6 +20,11 @@ STORY_RUNS = {
 SWEEP_ID = "idhaaw5i"
 NEGATIVES_SWEEP_ID = "uukeyzw7"   # sweeps/negatives_by_split.yaml: hard negatives x six splits
 
+# The follow-up experiment (docs/post-2): filled in once each sweep is registered.
+LEVERS_SWEEP_ID = "j1zdu28j"              # sweeps/levers.yaml: MTHSPL data x strength head x six splits x two seeds
+LEVERS_CONTROL_SWEEP_IDS = {"steps": "2exoct4h", "size": "ocmpf5na"}   # sweeps/levers_control_*.yaml
+KFOLD_GROUP = "kfold-k7"          # scripts/14_kfold.py: seven folds by ingredient + the all-data model
+
 # The split-and-seed-variance runs (scripts/12_split_seeds.py), job -> run id.
 # Selected by id in the report, like STORY_RUNS, so a crashed or duplicate run
 # in the same group can never land in a panel.

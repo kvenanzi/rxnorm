@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .data import Data
+from .data import PRIMARY_SOURCE, Data
 
 SPLITS = ["train", "val", "test"]
 TOP_K = 5
@@ -67,17 +67,34 @@ def evaluate(data: Data, ret: Retrieval, rows: np.ndarray, confidence: np.ndarra
 
 
 def evaluate_splits(data: Data, ret: Retrieval, confidence: np.ndarray,
-                    margin: np.ndarray | None = None) -> dict[str, dict]:
-    """evaluate() on every split; optionally also the curve for a margin confidence."""
-    results = {}
-    for split in SPLITS:
-        rows = data.rows(split)
+                    margin: np.ndarray | None = None, extra_sources: bool = True) -> dict[str, dict]:
+    """evaluate() on every split; optionally also the curve for a margin confidence.
+
+    The keys train/val/test are the VA strings only, as in every published run.
+    A folder that also carries another source's strings (e.g. MTHSPL) gets
+    extra keys val_mthspl / test_mthspl. Empty splits (the all-train folder of
+    the k-fold experiment has no val or test) are skipped rather than scored."""
+    def one(rows: np.ndarray) -> dict:
         ev = evaluate(data, ret, rows, confidence[rows])
         if margin is not None:
             ev_m = evaluate(data, ret, rows, margin[rows])
             ev["curve_margin"] = ev_m["curve"]
             ev["metrics"]["margin/coverage@99%precision"] = ev_m["metrics"]["coverage@99%precision"]
-        results[split] = ev
+        return ev
+
+    results = {}
+    for split in SPLITS:
+        rows = data.rows(split)
+        if len(rows):
+            results[split] = one(rows)
+    if extra_sources:
+        for src in data.sources:
+            if src == PRIMARY_SOURCE:
+                continue
+            for split in ("val", "test"):
+                rows = data.rows(split, src)
+                if len(rows):
+                    results[f"{split}_{src.lower()}"] = one(rows)
     return results
 
 
@@ -101,10 +118,10 @@ def failure_rows(data: Data, ret: Retrieval, rows: np.ndarray, ev: dict, limit: 
 
 def print_summary(name: str, results: dict[str, dict]) -> None:
     print(f"\n{name}")
-    print(f"{'split':<6}" + "".join(f"{c:>23}" for c in METRIC_COLS))
+    print(f"{'split':<12}" + "".join(f"{c:>23}" for c in METRIC_COLS))
     for split, ev in results.items():
         m = ev["metrics"]
-        print(f"{split:<6}" + "".join(
+        print(f"{split:<12}" + "".join(
             f"{m[c]:>23}" if c == "n" else f"{m[c]:>23.3f}" for c in METRIC_COLS))
 
 
@@ -123,6 +140,7 @@ def log_results(run, name: str, data: Data, ret: Retrieval, results: dict[str, d
             xs=COVERAGES, ys=ys, keys=keys,
             title=f"{name}: precision at automation rate ({split})", xname="coverage")})
 
-    table = wandb.Table(columns=["vandf_string", "truth", "top5", "wrong_components"],
-                        data=failure_rows(data, ret, data.rows("test"), results["test"], N_FAILURES))
-    run.log({"test/failures": table})
+    if "test" in results:
+        table = wandb.Table(columns=["vandf_string", "truth", "top5", "wrong_components"],
+                            data=failure_rows(data, ret, data.rows("test"), results["test"], N_FAILURES))
+        run.log({"test/failures": table})
