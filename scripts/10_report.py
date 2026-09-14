@@ -23,9 +23,7 @@ DESCRIPTION = ("Mapping VA drug strings to full RxNorm clinical drugs (ingredien
                "with a fine-tuned bi-encoder, calibrated confidence, and abstention.")
 GITHUB = "https://github.com/kvenanzi/rxnorm"
 HF_MODEL = "https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder"
-STORY_NAMES = ["exact", "tfidf", "all-minilm-l6-v2-ingredient",
-               "all-minilm-l6-v2-ingredient-strength", "sapbert-ingredient-strength-final"]
-TRAIN_NAMES = STORY_NAMES[2:]
+TRAIN_RUNS = ["minilm", "minilm+normalizer", "final"]  # keys into STORY_RUNS
 SIGNALS = ["cosine", "margin", "softmax", "platt"]
 
 
@@ -56,17 +54,22 @@ def log_report_data() -> None:
     print(f"logged report-data run {r.id} with {len(curves)} curves")
 
 
-def names_filter(names: list[str]) -> str:
-    return "Name in [" + ", ".join(f"'{n}'" for n in names) + "]"
+def ids_filter(ids) -> str:
+    # By run ID, not name: two sweep runs share names with the story runs, and a
+    # name filter pulls them into these panels too.
+    return "ID in [" + ", ".join(f"'{i}'" for i in ids) + "]"
 
 
 def build_report() -> wr.Report:
     story = wr.Runset(entity=ENTITY, project=PROJECT, name="Baselines and trained models",
-                      filters=names_filter(STORY_NAMES))
-    trained = wr.Runset(entity=ENTITY, project=PROJECT, name="Trained models", filters=names_filter(TRAIN_NAMES))
+                      filters=ids_filter(STORY_RUNS.values()))
+    trained = wr.Runset(entity=ENTITY, project=PROJECT, name="Trained models",
+                        filters=ids_filter(STORY_RUNS[k] for k in TRAIN_RUNS))
+    # Booleans must be Python-style: a lowercase `false`/`true` is saved as the
+    # *string* "false"/"true", which matches no run and empties every panel.
     sweep = wr.Runset(entity=ENTITY, project=PROJECT, name="Sweep (18 runs)",
-                      filters="Config('log_model') = false and Config('smoke') = false")
-    curves = wr.Runset(entity=ENTITY, project=PROJECT, name="Curves", filters="Config('report_data') = true")
+                      filters="Config('log_model') == False and Config('smoke') == False")
+    curves = wr.Runset(entity=ENTITY, project=PROJECT, name="Curves", filters="Config('report_data') == True")
 
     W = 24  # panel grid width units
     blocks = [
@@ -118,10 +121,13 @@ def build_report() -> wr.Report:
              "over TF-IDF-mined or in-batch only, +3."),
         wr.PanelGrid(runsets=[sweep], panels=[
             wr.ParallelCoordinatesPlot(title="Sweep", columns=[
-                wr.ParallelCoordinatesPlotColumn(metric="c::base_model", display_name="encoder"),
-                wr.ParallelCoordinatesPlotColumn(metric="c::negatives", display_name="hard negatives"),
-                wr.ParallelCoordinatesPlotColumn(metric="c::normalize_strength", display_name="strength normalizer"),
-                wr.ParallelCoordinatesPlotColumn(metric="val/acc@1"),
+                # Typed metrics: a plain string is always read as a summary key, so
+                # "c::base_model" became summary:c::base_model, which no run has.
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("base_model"), display_name="encoder"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("negatives"), display_name="hard negatives"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("normalize_strength"),
+                                                 display_name="strength normalizer"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.SummaryMetric("val/acc@1")),
             ], layout=wr.Layout(x=0, y=0, w=W, h=10)),
             wr.ParameterImportancePlot(with_respect_to="val/acc@1", layout=wr.Layout(x=0, y=10, w=W // 2, h=8)),
             wr.BarPlot(title="val/acc@1 by encoder", metrics=["val/acc@1"], groupby="base_model",
@@ -170,7 +176,8 @@ def build_report() -> wr.Report:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-data", action="store_true", help="don't re-log the report-data run")
-    ap.add_argument("--url", help="update this existing report's blocks instead of creating a new one")
+    ap.add_argument("--url", help="update this existing report in place; replaces every block, "
+                                  "including prose edited in the W&B editor")
     args = ap.parse_args()
     if not args.skip_data:
         log_report_data()
