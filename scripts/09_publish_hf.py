@@ -121,7 +121,13 @@ The candidate pool is all 27,287 active SCD/SBD in RxNorm 2026-09-08.
 | + strength normalizer | 0.886 | 0.975 | 0.982 | 0.941 | 0.943 |
 | **SapBERT + normalizer (this model)** | **0.931** | **0.984** | 0.983 | 0.961 | 0.972 |
 
-Validation: acc@1 0.883, recall@5 0.961 (a harder draw of ingredients).
+Validation: acc@1 0.883, recall@5 0.961.
+
+The 0.931 is one draw of the ingredient split. Re-drawing the split five more
+times and retraining the same recipe gives test acc@1 **0.907 ± 0.019** (range
+0.874–0.931; the published split is the most favorable of the six), while the
+training seed moves it by 0.001. Read the headline as a band of about two
+points. Recall@5 (0.974–0.988) and the component accuracies barely move.
 
 **Abstention.** Thresholds chosen on validation, measured on test:
 
@@ -136,12 +142,17 @@ number as the estimate, not the target.
 An 18-run sweep (3 encoders × 3 negative strategies × normalizer on/off) found
 the three effects roughly additive: domain pre-training (SapBERT vs general
 encoders) +8.6 points val acc@1, the strength normalizer +4.8, ingredient-matched
-hard negatives +3. Live charts: __WANDB__.
+hard negatives +3. The hard-negatives effect was then re-run on all six ingredient
+splits (18 runs): ingredient-matched negatives beat in-batch-only on every split, by
+1.6 points of test acc@1 on average (95% CI 0.8–2.4). Live charts: __WANDB__.
 
 ## Limitations
 
 - **Trained and evaluated on VA strings only.** Other systems' drug names are a
   different distribution; accuracy there is unmeasured.
+- **One split for calibration.** The abstention thresholds were chosen on one
+  validation draw; the six-split experiment covers accuracy, not calibration.
+  Re-choose thresholds on your own held-out data.
 - **Candidates are RxNorm 2026-09-08.** RxNorm changes monthly; rebuild
   `candidates.parquet` for a newer release (`scripts/03_build_dataset.py` in the repo).
 - **Not for unsupervised clinical use.** A 7% top-1 error rate on medication
@@ -158,7 +169,7 @@ hard negatives +3. Live charts: __WANDB__.
   `NO_DUPLICATES` batch sampler; negatives drawn from train-split candidates only
 - 4 epochs, batch 64, lr 2e-5, 10% warmup, fp16, max_seq_length 96, seed 42
 - Best epoch by validation acc@1; test scored once
-- ~20 min on a GTX 1070, ~2 min on a T4
+- ~20 min on a GTX 1070, ~2 min on a Colab A100
 
 ## Data and license
 
@@ -264,8 +275,13 @@ their generic SCD's ingredients so a brand and its generic share a split.
 | mixed | 1,327 | 3,303 | – |
 
 Test therefore measures generalization to **drugs whose ingredients were never
-seen in training**. Val happens to be a harder draw than test for every method
-tried (TF-IDF 0.465 vs 0.509 acc@1); report both.
+seen in training**. On this draw val is harder than test for every method tried
+(TF-IDF 0.465 vs 0.509 acc@1), but that is a property of the draw, not the
+task: over six salts of the same hash the val − test gap flips sign three times,
+and the fine-tuned model's test acc@1 spans 0.874–0.931 (sd 0.019). The salt
+for this release is `rxnorm-2026-09-08-v1`; the five re-draws (`-v2` … `-v6`)
+are built by `scripts/03_build_dataset.py --salt` in the repo and are logged
+there as the W&B artifact `vandf-rxnorm-splits`. Report val and test both.
 
 ## Known quirks
 

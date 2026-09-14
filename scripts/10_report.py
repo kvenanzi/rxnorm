@@ -16,8 +16,8 @@ import argparse
 import wandb
 import wandb_workspaces.reports.v2 as wr
 
-from rxnorm_vandf.wb import (ENTITY, PROJECT, SPLIT_SEED_RUNS, STORY_RUNS, SWEEP_ID, latest_calibrate_run,
-                             line_series, run)
+from rxnorm_vandf.wb import (ENTITY, NEGATIVES_SWEEP_ID, PROJECT, SPLIT_SEED_RUNS, STORY_RUNS, SWEEP_ID,
+                             latest_calibrate_run, line_series, run)
 
 TITLE = "VANDF → RxNorm: how far a small model gets at the clinical-drug level"
 DESCRIPTION = ("Mapping VA drug strings to full RxNorm clinical drugs (ingredient + strength + dose form) "
@@ -75,6 +75,8 @@ def build_report() -> wr.Report:
     curves = wr.Runset(entity=ENTITY, project=PROJECT, name="Curves", filters="Config('report_data') == True")
     seeds = wr.Runset(entity=ENTITY, project=PROJECT, name="Split and seed variance (8 runs)",
                       filters=ids_filter(SPLIT_SEED_RUNS.values()))
+    negatives = wr.Runset(entity=ENTITY, project=PROJECT, name="Hard negatives × six splits (18 runs)",
+                          filters=f"Metric('Sweep') == '{NEGATIVES_SWEEP_ID}'")
 
     W = 24  # panel grid width units
     blocks = [
@@ -99,7 +101,8 @@ def build_report() -> wr.Report:
             "| + strength normalizer | 0.886 | 0.975 | 0.941 | 0.943 |\n"
             "| **SapBERT + negatives + normalizer** | **0.931** | **0.984** | 0.961 | 0.972 |\n\n"
             "The final row is the published split; across six ingredient draws the same recipe scores "
-            "0.907 ± 0.019 (see *Split and seed variance* below)."),
+            "0.907 ± 0.019, and ingredient-matched negatives beat in-batch-only on every draw "
+            "(see *Split and seed variance* below)."),
         wr.PanelGrid(runsets=[story], panels=[
             wr.BarPlot(title="Test acc@1", metrics=["test/acc@1"], layout=wr.Layout(x=0, y=0, w=W // 2, h=8)),
             wr.BarPlot(title="Test recall@5", metrics=["test/recall@5"], layout=wr.Layout(x=W // 2, y=0, w=W // 2, h=8)),
@@ -167,6 +170,30 @@ def build_report() -> wr.Report:
             wr.LinePlot(title="Validation acc@1 by epoch", x="epoch", y=["val/acc@1"],
                         layout=wr.Layout(x=W // 2, y=9, w=W // 2, h=8)),
         ]),
+        wr.H2("Does the hard-negatives effect survive a re-drawn split?"),
+        wr.P("The sweep measured its three effects on one split, and the +3 for ingredient-matched negatives is "
+             "about the size of the split noise. A second sweep re-ran that one factor on all six splits with "
+             "SapBERT and the normalizer on (18 runs, one A100), so each comparison is paired within a split."),
+        wr.MarkdownBlock(
+            "| contrast | test acc@1, mean diff | 95% CI | splits with + sign | val acc@1, mean diff |\n"
+            "|---|---|---|---|---|\n"
+            "| ingredient − none | **+0.016** | +0.008 to +0.024 | 6 / 6 | +0.021 |\n"
+            "| ingredient − tfidf | +0.013 | +0.002 to +0.023 | 6 / 6 | +0.013 |\n"
+            "| tfidf − none | +0.003 | −0.013 to +0.019 | 4 / 6 | +0.008 |\n\n"
+            "Ingredient-matched negatives win on every split, by 1.6 points on test on average (0.2 to 2.3). "
+            "TF-IDF-mined negatives are indistinguishable from in-batch only. Recall@5 does not move with the "
+            "strategy. The v1 cells reproduced the original sweep's to four decimals."),
+        wr.PanelGrid(runsets=[negatives], panels=[
+            wr.BarPlot(title="Test acc@1 by hard-negative strategy (mean over six splits)", metrics=["test/acc@1"],
+                       groupby="negatives", groupby_aggfunc="mean", layout=wr.Layout(x=0, y=0, w=W // 2, h=8)),
+            wr.BarPlot(title="Test acc@1 by split (mean over strategies)", metrics=["test/acc@1"],
+                       groupby="dataset_subdir", groupby_aggfunc="mean", layout=wr.Layout(x=W // 2, y=0, w=W // 2, h=8)),
+            wr.ParallelCoordinatesPlot(title="Split × strategy", columns=[
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("dataset_subdir"), display_name="split"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("negatives"), display_name="hard negatives"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.SummaryMetric("test/acc@1")),
+            ], layout=wr.Layout(x=0, y=8, w=W, h=9)),
+        ]),
 
         wr.H1("Calibration and abstention"),
         wr.P("A cosine score isn't a probability. Four confidence signals were compared: raw cosine, the top-1 − "
@@ -200,7 +227,8 @@ def build_report() -> wr.Report:
         wr.UnorderedList(items=[
             "Trained and evaluated on VA strings only; other systems' naming conventions are unmeasured.",
             "The headline 0.931 is the best of six ingredient draws; the same recipe averages 0.907 ± 0.019 across "
-            "them, so read it as a band of about two points. The sweep and the calibration were run on one split.",
+            "them, so read it as a band of about two points. The hard-negatives effect was re-checked on all six "
+            "splits; the encoder and normalizer effects, and the calibration, rest on one split.",
             "The 99% precision target chosen on validation lands at 98.2–98.8% on test.",
             "RxNorm 2026-09-08; the candidate pool changes monthly.",
         ]),
