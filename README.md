@@ -54,7 +54,7 @@ data/          RxNorm release, rxnorm.duckdb, processed parquet (gitignored; nev
 docs/          write-up and figures; RxNorm / training / calibration / W&B primers
 rxnorm_vandf/  the package: data, evaluation, TF-IDF, training, calibration, strength rules, inference
 scripts/       numbered pipeline: load, checkpoint, build dataset, upload, baselines, train, calibrate, sweep, publish, report, figures, split seeds
-notebooks/     Colab notebooks: train one model; run the sweep; run the split-seed matrix
+notebooks/     Colab notebooks: train one model; run the sweeps; run the split-seed matrix
 sweeps/        W&B sweep definitions
 tests/         pytest unit tests
 models/        local training outputs (gitignored)
@@ -92,6 +92,8 @@ uv run scripts/12_split_seeds.py build         # five more ingredient splits und
 uv run scripts/12_split_seeds.py tfidf         # TF-IDF on every split
 uv run scripts/12_split_seeds.py train         # the final recipe on 6 splits + 2 extra seeds (~20 min each locally)
 uv run scripts/12_split_seeds.py summarize     # mean / sd table -> outputs/split_seeds/
+uv run scripts/08_sweep.py --create --config sweeps/negatives_by_split.yaml   # hard negatives x 6 splits; run in Colab (below)
+uv run scripts/12_split_seeds.py negatives     # paired analysis of that sweep
 ```
 
 ### Training in Colab
@@ -111,6 +113,10 @@ split-and-seed-variance matrix (`12_split_seeds.py train`, 8 runs, ~16 min on a
 T4). The splits come from a separate artifact, `vandf-rxnorm-splits`, logged
 locally with `12_split_seeds.py upload`; the published `vandf-rxnorm-pairs`
 artifact is never re-logged.
+
+[`notebooks/04_negatives_by_split.ipynb`](notebooks/04_negatives_by_split.ipynb) runs
+the second sweep, `sweeps/negatives_by_split.yaml`: the hard-negative strategy on
+all six splits with SapBERT and the normalizer (18 runs, ~20 min on an A100).
 
 ## Where things run
 

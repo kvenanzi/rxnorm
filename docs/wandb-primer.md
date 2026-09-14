@@ -18,7 +18,7 @@ and which data went in. This primer covers the pieces this project uses.
 | **Artifact** | A versioned bundle of files. Log it once, then any run can `use_artifact` it. | `vandf-rxnorm-pairs`: the three parquet files. Colab pulls this instead of needing the raw RxNorm release. |
 | **Lineage** | The graph of which runs produced and consumed which artifacts. | The artifact page shows `04_upload_dataset` produced it and the baseline runs used it. |
 | **Table** | A spreadsheet logged to a run; sortable and filterable in the UI. | `test/failures`: 200 test strings the baseline got wrong, with its top 5 guesses. |
-| **Sweep** | W&B picks settings from a grid or distribution and launches a run per setting. | `sweeps/grid.yaml`: encoder × hard-negative strategy × strength normalizer, 18 runs. |
+| **Sweep** | W&B picks settings from a grid or distribution and launches a run per setting. | `sweeps/grid.yaml` (and `sweeps/negatives_by_split.yaml`, the hard-negatives-by-split follow-up): encoder × hard-negative strategy × strength normalizer, 18 runs. |
 | **Report** | A document with live charts pulled from runs, publishable at a URL. | The live companion to the [write-up](post/README.md): training curves, the sweep, calibration. |
 
 ## The lifecycle of a run

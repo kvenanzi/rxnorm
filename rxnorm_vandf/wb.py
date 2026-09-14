@@ -18,6 +18,7 @@ STORY_RUNS = {
     "final": "0d9ntjls",
 }
 SWEEP_ID = "idhaaw5i"
+NEGATIVES_SWEEP_ID = "uukeyzw7"   # sweeps/negatives_by_split.yaml: hard negatives x six splits
 
 # The split-and-seed-variance runs (scripts/12_split_seeds.py), job -> run id.
 # Selected by id in the report, like STORY_RUNS, so a crashed or duplicate run

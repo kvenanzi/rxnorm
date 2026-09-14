@@ -19,6 +19,7 @@ Run from the repo root:
   uv run scripts/12_split_seeds.py train                # 8 runs, ~20 min each on a GTX 1070
   uv run scripts/12_split_seeds.py upload               # Colab: log the splits as an artifact
   uv run scripts/12_split_seeds.py summarize            # table + summary.json from W&B
+  uv run scripts/12_split_seeds.py negatives            # paired analysis of sweeps/negatives_by_split.yaml
 In Colab (notebooks/03_split_seeds.ipynb):  python scripts/12_split_seeds.py train --from-artifact
 """
 
@@ -317,6 +318,116 @@ def render_markdown(rows: list[dict], stats: dict, published: dict) -> str:
     return "\n".join(lines)
 
 
+# ------------------------------------------------------- negatives across splits
+
+NEGATIVE_LEVELS = ["ingredient", "tfidf", "none"]
+CONTRASTS = [("ingredient", "none"), ("tfidf", "none"), ("ingredient", "tfidf")]
+PAIRED_METRICS = ["test/acc@1", "val/acc@1", "test/recall@5"]
+# t_{0.975, df} for the paired interval; n is small and fixed, so no scipy import
+# (tests execute this module at import).
+T_975 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262}
+
+
+def paired_stats(cells: dict[tuple[str, str], dict[str, float]],
+                 metrics: list[str] = PAIRED_METRICS) -> dict[str, dict[str, dict]]:
+    """Within-split differences between negative strategies. `cells` maps
+    (split, negatives) -> metrics. For each contrast and metric: the per-split
+    differences, mean, sd, standard error, a 95% t interval, and how many
+    splits have the expected (positive) sign."""
+    splits = sorted({s for s, _ in cells})
+    out: dict[str, dict[str, dict]] = {}
+    for a, b in CONTRASTS:
+        for m in metrics:
+            diffs = {s: cells[(s, a)][m] - cells[(s, b)][m]
+                     for s in splits if (s, a) in cells and (s, b) in cells}
+            if not diffs:
+                continue
+            vals = list(diffs.values())
+            d = describe(vals)
+            k = len(vals)
+            se = d["sd"] / math.sqrt(k) if k > 1 else None
+            t = T_975.get(k - 1)
+            d.update({"se": se, "ci95": [d["mean"] - t * se, d["mean"] + t * se] if se is not None and t else None,
+                      "t": d["mean"] / se if se else None, "n_pos": sum(v > 0 for v in vals), "diffs": diffs})
+            out.setdefault(f"{a}-{b}", {})[m] = d
+    return out
+
+
+def cmd_negatives(args: argparse.Namespace) -> None:
+    """Table and paired contrasts for the negatives-by-split sweep, plus the
+    replication rows: the v1 cells of the original sweep and the split-v1 run."""
+    from rxnorm_vandf.wb import ENTITY, PROJECT, NEGATIVES_SWEEP_ID, SPLIT_SEED_RUNS, SWEEP_ID, api, run as wb_run
+
+    sweep_id = args.sweep or NEGATIVES_SWEEP_ID
+    if not sweep_id:
+        raise SystemExit("no sweep id: pass --sweep or fill in NEGATIVES_SWEEP_ID in rxnorm_vandf/wb.py")
+
+    def metrics_of(r) -> dict[str, float]:
+        s = dict(r.summary)
+        return {m: s.get(m) for m in PAIRED_METRICS + ["test/n", "val/n", "test/strength_acc", "test/dose_form_acc",
+                                                        "test/ingredient_acc"]}
+
+    cells, run_ids = {}, {}
+    for r in api().sweep(f"{ENTITY}/{PROJECT}/{sweep_id}").runs:
+        if r.state != "finished" or r.config.get("smoke"):
+            continue
+        key = (r.config.get("dataset_subdir"), r.config.get("negatives"))
+        if key in cells and r.created_at < run_ids[key][1]:
+            continue                                   # a re-run replaces an older finished cell
+        cells[key], run_ids[key] = metrics_of(r), (r.id, r.created_at)
+    expected = [(k, n) for k in SPLITS for n in NEGATIVE_LEVELS]
+    missing = [f"{k}/{n}" for k, n in expected if (k, n) not in cells]
+    if missing:
+        print("missing cells:", ", ".join(missing))
+
+    replication = {}
+    for r in api().sweep(f"{ENTITY}/{PROJECT}/{SWEEP_ID}").runs:
+        if "SapBERT" in r.config.get("base_model", "") and r.config.get("normalize_strength") and r.state == "finished":
+            replication[f"v1/{r.config['negatives']} (T4 sweep {SWEEP_ID}, {r.id})"] = metrics_of(r)
+    if "split-v1" in SPLIT_SEED_RUNS:
+        replication[f"v1/ingredient (split-seeds, {SPLIT_SEED_RUNS['split-v1']})"] = metrics_of(wb_run(SPLIT_SEED_RUNS["split-v1"]))
+
+    stats = paired_stats(cells)
+    payload = {"sweep_id": sweep_id,
+               "cells": {f"{k}/{n}": {**v, "run_id": run_ids[(k, n)][0]} for (k, n), v in cells.items()},
+               "missing": missing, "stats": stats, "replication": replication}
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "negatives.json").write_text(json.dumps(payload, indent=2, default=str) + "\n")
+    md = render_negatives_markdown(cells, stats, replication)
+    (OUT / "negatives.md").write_text(md)
+    print(md)
+    print(f"wrote {(OUT / 'negatives.json').relative_to(ROOT)} and negatives.md")
+
+
+def render_negatives_markdown(cells: dict, stats: dict, replication: dict) -> str:
+    f3 = lambda v: "–" if v is None else f"{v:.3f}"
+    lines = ["| split | " + " | ".join(f"{n}: test (val)" for n in NEGATIVE_LEVELS)
+             + " | ingredient − none, test | ingredient − none, val |",
+             "|---|" + "---|" * (len(NEGATIVE_LEVELS) + 2)]
+    for k in SPLITS:
+        row = [k]
+        for n in NEGATIVE_LEVELS:
+            c = cells.get((k, n))
+            row.append("–" if c is None else f"{f3(c['test/acc@1'])} ({f3(c['val/acc@1'])})")
+        for m in ("test/acc@1", "val/acc@1"):
+            dd = stats.get("ingredient-none", {}).get(m, {}).get("diffs", {})
+            row.append(f"{dd[k]:+.3f}" if k in dd else "–")
+        lines.append("| " + " | ".join(row) + " |")
+    lines += ["", "| contrast | metric | splits | mean diff | sd | 95% CI | splits with + sign | paired t |",
+              "|---|---|---|---|---|---|---|---|"]
+    for contrast, per in stats.items():
+        for m, d in per.items():
+            ci = "–" if not d.get("ci95") else f"{d['ci95'][0]:+.3f} to {d['ci95'][1]:+.3f}"
+            lines.append(f"| {contrast} | {m} | {d['n_runs']} | {d['mean']:+.3f} | {d['sd']:.3f} | {ci} | "
+                         f"{d['n_pos']} / {d['n_runs']} | {f3(d.get('t'))} |")
+    if replication:
+        lines += ["", "| replication row | test acc@1 | val acc@1 | test recall@5 |", "|---|---|---|---|"]
+        for name, c in replication.items():
+            lines.append(f"| {name} | {f3(c['test/acc@1'])} | {f3(c['val/acc@1'])} | {f3(c['test/recall@5'])} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 # ------------------------------------------------------------------------- main
 
 def main() -> None:
@@ -326,6 +437,8 @@ def main() -> None:
     sub.add_parser("tfidf").set_defaults(fn=cmd_tfidf)
     sub.add_parser("upload").set_defaults(fn=cmd_upload)
     sub.add_parser("summarize").set_defaults(fn=cmd_summarize)
+    n = sub.add_parser("negatives", help="paired analysis of the negatives-by-split sweep")
+    n.add_argument("--sweep", help="sweep id (default: wb.NEGATIVES_SWEEP_ID)"); n.set_defaults(fn=cmd_negatives)
     for name, fn in (("train", cmd_train), ("_one", cmd_one)):
         p = sub.add_parser(name)
         if name == "train":

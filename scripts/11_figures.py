@@ -251,12 +251,64 @@ def fig_split_seeds() -> dict:
     return {"rows": summary["rows"], "stats": summary["stats"], "published": summary["published"]}
 
 
+def fig_negatives_by_split() -> dict:
+    """The hard-negative strategy on every split (sweeps/negatives_by_split.yaml):
+    test and val acc@1 per split for ingredient / tfidf / none, and the paired
+    ingredient − none differences. Reads outputs/split_seeds/negatives.json."""
+    neg = json.loads((ROOT / "outputs" / "split_seeds" / "negatives.json").read_text())
+    levels = ["ingredient", "tfidf", "none"]
+    splits = [f"v{i}" for i in range(1, 7)]
+    cells = neg["cells"]
+    y = np.arange(len(splits))
+    fig, axes = plt.subplots(1, 3, figsize=(9.6, 3.6), sharey=True, gridspec_kw={"width_ratios": [3, 3, 2]})
+    for ax, (metric, title) in zip(axes[:2], [("test/acc@1", "Test acc@1"), ("val/acc@1", "Validation acc@1")]):
+        for yi, k in zip(y, splits):
+            vals = [cells.get(f"{k}/{n}", {}).get(metric) for n in levels]
+            present = [v for v in vals if v is not None]
+            if len(present) > 1:
+                ax.plot([min(present), max(present)], [yi, yi], color=GRID, linewidth=2, zorder=1)
+            for v, c, n in zip(vals, SERIES, levels):
+                if v is not None:
+                    ax.scatter([v], [yi], s=60, color=c, zorder=3, edgecolor=SURFACE, linewidth=1.2,
+                               label=n if yi == 0 else None)
+        ax.set_title(title, loc="left", color=INK, fontsize=10.5)
+        ax.set_xlabel("acc@1, all 27,287 candidates")
+        style(ax)
+    ax = axes[2]
+    d = neg["stats"].get("ingredient-none", {}).get("test/acc@1", {})
+    diffs = d.get("diffs", {})
+    ax.axvline(0, color=BASELINE, linewidth=1)
+    for yi, k in zip(y, splits):
+        if k in diffs:
+            ax.plot([0, diffs[k]], [yi, yi], color=GRID, linewidth=2, zorder=1)
+            ax.scatter([diffs[k]], [yi], s=60, color=SERIES[0], zorder=3, edgecolor=SURFACE, linewidth=1.2)
+    if d.get("ci95"):
+        ax.axvspan(d["ci95"][0], d["ci95"][1], color=SERIES[0], alpha=0.08, zorder=0)
+        ax.axvline(d["mean"], color=SERIES[0], alpha=0.35, linewidth=1, zorder=0)
+    ax.set_title("ingredient − none, test", loc="left", color=INK, fontsize=10.5)
+    ax.set_xlabel("paired difference (band: mean, 95% CI)")
+    style(ax)
+    axes[0].set_yticks(y, [f"split {k}" for k in splits])
+    axes[0].set_ylim(len(splits) - 0.5, -0.6)
+    for a in axes:
+        lo, hi = a.get_xlim()
+        a.set_xlim(lo - 0.03 * (hi - lo), hi + 0.03 * (hi - lo))
+    fig.legend(*axes[0].get_legend_handles_labels(), frameon=False, fontsize=8.5, ncol=3,
+               loc="upper center", bbox_to_anchor=(0.5, 0.0), title="hard negatives", title_fontsize=8.5)
+    fig.suptitle("Does ingredient-matched hard-negative mining survive a re-drawn split?",
+                 x=0.01, y=1.04, ha="left", color=INK, fontsize=11)
+    fig.savefig(OUT / "negatives_by_split.png")
+    plt.close(fig)
+    return {"cells": cells, "stats": neg["stats"], "replication": neg["replication"], "missing": neg["missing"]}
+
+
 FIGURES = {
     "progression": lambda: fig_progression({name: dict(run(rid).summary) for name, rid in STORY_RUNS.items()}),
     "sweep_effects": fig_sweep_effects,
     "precision_coverage": fig_precision_coverage,
     "error_taxonomy": fig_error_taxonomy,
     "split_seeds": fig_split_seeds,
+    "negatives_by_split": fig_negatives_by_split,
 }
 
 

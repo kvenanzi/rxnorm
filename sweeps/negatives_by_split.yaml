@@ -1,0 +1,30 @@
+# W&B Sweep: the hard-negative strategy on every ingredient split, 18 runs.
+# The 18-run grid (grid.yaml) measured its three effects on the published split
+# only; §5.8 of the write-up shows the split itself moves test acc@1 by ~0.02,
+# which is the size of the hard-negatives effect. This re-runs that one factor
+# on all six splits with the winning encoder and the normalizer on, so the
+# comparison is paired within split and all on one machine.
+# Register: uv run scripts/08_sweep.py --create --config sweeps/negatives_by_split.yaml
+# Run:      notebooks/04_negatives_by_split.ipynb (A100: ~1 min per run)
+name: negatives-by-split
+method: grid
+metric:
+  name: val/acc@1
+  goal: maximize
+parameters:
+  base_model:
+    value: cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+  negatives:
+    values: [ingredient, tfidf, none]
+  normalize_strength:
+    value: true
+  dataset_artifact:
+    value: vandf-rxnorm-splits:v0     # six split folders; vandf-rxnorm-pairs is untouched
+  dataset_subdir:
+    values: [v1, v2, v3, v4, v5, v6]
+  epochs:
+    value: 4
+  batch_size:
+    value: 64
+  lr:
+    value: 2.0e-5                     # decimal form: YAML reads 2e-5 as a string

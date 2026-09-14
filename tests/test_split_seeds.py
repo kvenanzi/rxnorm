@@ -63,3 +63,36 @@ def test_describe():
     assert one["sd"] == 0.0 and "excess_sd" not in one
     # Observed spread below the sampling floor clamps to zero rather than going imaginary.
     assert seeds.describe([0.930, 0.931], [1000, 1000])["excess_sd"] == 0.0
+
+
+def test_paired_stats():
+    cells = {}
+    for i, (ing, tf, none) in enumerate([(0.93, 0.92, 0.90), (0.91, 0.90, 0.89), (0.90, 0.91, 0.88)], 1):
+        cells[(f"v{i}", "ingredient")], cells[(f"v{i}", "tfidf")], cells[(f"v{i}", "none")] = (
+            {"test/acc@1": ing}, {"test/acc@1": tf}, {"test/acc@1": none})
+    st = seeds.paired_stats(cells, metrics=["test/acc@1"])
+    d = st["ingredient-none"]["test/acc@1"]
+    assert d["n_runs"] == 3 and d["n_pos"] == 3
+    assert math.isclose(d["mean"], (0.03 + 0.02 + 0.02) / 3)
+    assert math.isclose(d["se"], d["sd"] / math.sqrt(3)) and math.isclose(d["ci95"][1] - d["mean"], 4.303 * d["se"])
+    assert st["ingredient-tfidf"]["test/acc@1"]["n_pos"] == 2      # v3 goes the other way
+    # a missing cell drops that split from the contrast rather than failing
+    del cells[("v3", "none")]
+    assert seeds.paired_stats(cells, metrics=["test/acc@1"])["ingredient-none"]["test/acc@1"]["n_runs"] == 2
+    assert seeds.paired_stats({}, metrics=["test/acc@1"]) == {}
+
+
+def test_smoke_config_collapses_grid():
+    import yaml
+    sweep = load("08_sweep")
+    grid = yaml.safe_load((ROOT / "sweeps" / "grid.yaml").read_text())
+    sm = sweep.smoke_config(grid)
+    assert sm["name"] == "smoke-sweep" or sm["name"].startswith("smoke-")
+    assert sm["parameters"]["base_model"] == {"value": "sentence-transformers/all-MiniLM-L6-v2"}
+    assert sm["parameters"]["negatives"] == {"value": "ingredient"}
+    assert sm["parameters"]["normalize_strength"] == {"value": False}
+    assert sm["parameters"]["smoke"] == {"value": True}
+    assert "values" in grid["parameters"]["base_model"]          # the input is not mutated
+    neg = yaml.safe_load((ROOT / "sweeps" / "negatives_by_split.yaml").read_text())
+    assert isinstance(neg["parameters"]["lr"]["value"], float)   # 2.0e-5, not the string "2e-5"
+    assert sweep.smoke_config(neg)["parameters"]["dataset_subdir"] == {"value": "v1"}

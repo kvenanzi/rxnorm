@@ -53,6 +53,7 @@ class TrainConfig:
 def auto_name(cfg: "TrainConfig") -> str:
     return (f"{cfg.base_model.split('/')[-1].lower()}-{cfg.negatives}"
             + ("-strength" if cfg.normalize_strength else "")
+            + (f"-{cfg.dataset_subdir}" if cfg.dataset_subdir else "")
             + ("-smoke" if cfg.smoke else ""))
 
 

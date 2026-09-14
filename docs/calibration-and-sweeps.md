@@ -101,7 +101,7 @@ What it says:
 ## W&B Sweeps
 
 A **sweep** is a search over settings that W&B coordinates. You describe the
-space once (`sweeps/grid.yaml`); W&B hands out one combination at a time to
+space once (`sweeps/grid.yaml`; a second, smaller grid in `sweeps/negatives_by_split.yaml` re-runs one factor on six splits); W&B hands out one combination at a time to
 any **agent** that asks. An agent is just a loop: get a config, call `train()`,
 report the metric, repeat. Agents can run anywhere (Colab, this machine) and
 share the same grid.
