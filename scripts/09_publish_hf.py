@@ -75,7 +75,7 @@ confidence so you can auto-accept the sure cases and route the rest to review.
 Published tools such as RxMap normalize to the *ingredient* level (IN/MIN).
 This model targets the full clinical drug, where a miss on strength or dose
 form is a wrong answer. Method, hypotheses, the full sweep, and the error
-analysis are in the write-up: __GITHUB__/blob/main/docs/post/README.md.
+analysis are in the write-up: https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/
 
 ## Usage
 
