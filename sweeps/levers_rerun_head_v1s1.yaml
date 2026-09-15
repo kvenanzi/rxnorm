@@ -1,0 +1,37 @@
+# Make-up grid for sweeps/levers.yaml: the strength-head pair on split v1,
+# seed 1, lost in sweep nypttmi8 (the VA-only cell hit the sentence-
+# transformers import since fixed in losses.py; the SPL cell was killed when
+# the agent was stopped). levers_rerun_head.yaml re-issued only seed 42; the
+# audit of 2026-09-15 found this pair and v2/seed 42 still missing. A grid
+# can't hold two (split, seed) pairs without re-running two finished ones, so
+# each pair is its own 2-run sweep. `13_levers.py summarize` merges.
+name: levers-rerun-head-v1s1
+method: grid
+metric:
+  name: val/acc@1
+  goal: maximize
+parameters:
+  base_model:
+    value: cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+  negatives:
+    value: ingredient
+  normalize_strength:
+    value: true
+  dataset_artifact:
+    value: vandf-rxnorm-multi:v0
+  dataset_subdir:
+    value: v1
+  train_sources:
+    values: ["VANDF", "VANDF,MTHSPL"]
+  aux:
+    value: strength
+  aux_weight:
+    value: 0.01
+  seed:
+    value: 1
+  epochs:
+    value: 4
+  batch_size:
+    value: 64
+  lr:
+    value: 2.0e-5

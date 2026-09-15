@@ -21,7 +21,9 @@ SWEEP_ID = "idhaaw5i"
 NEGATIVES_SWEEP_ID = "uukeyzw7"   # sweeps/negatives_by_split.yaml: hard negatives x six splits
 
 # The follow-up experiment (docs/post-2): filled in once each sweep is registered.
-LEVERS_SWEEP_IDS = ["nypttmi8", "ad9nakej", "2v3am5xr"]   # levers.yaml + levers_rerun.yaml (aux-off v3..v6) + levers_rerun_head.yaml (v1/s42 head cells); j1zdu28j, 5cr5ze02 never ran
+# levers.yaml + levers_rerun.yaml (aux-off v3..v6) + the three head make-ups (levers_rerun_head.yaml v1/s42,
+# levers_rerun_head_v1s1.yaml, levers_rerun_head_v2s42.yaml); j1zdu28j and 5cr5ze02 were registered but never ran.
+LEVERS_SWEEP_IDS = ["nypttmi8", "ad9nakej", "2v3am5xr", "94onbtb5", "zcsece1l"]
 LEVERS_SWEEP_ID = LEVERS_SWEEP_IDS[0]
 LEVERS_CONTROL_SWEEP_IDS = {"steps": "2exoct4h", "size": "ocmpf5na"}   # sweeps/levers_control_*.yaml
 KFOLD_GROUP = "kfold-k7"          # scripts/14_kfold.py: seven folds by ingredient + the all-data model

@@ -1,10 +1,8 @@
-# Make-up grid for sweeps/levers.yaml: the two strength-head cells on split v1,
-# seed 42, that failed in sweep nypttmi8 (the loss imported a sentence-
-# transformers internal that Colab's version lacks; fixed in losses.py). A
-# grid sweep never re-issues a failed cell; `13_levers.py summarize` merges.
-# Six head cells were lost, not two: v1/seed 1 and v2/seed 42 are re-issued by
-# levers_rerun_head_v1s1.yaml and levers_rerun_head_v2s42.yaml.
-name: levers-rerun-head
+# Make-up grid for sweeps/levers.yaml: the strength-head pair on split v2,
+# seed 42, lost in sweep nypttmi8 (the VA-only cell hit the sentence-
+# transformers import since fixed in losses.py; the SPL cell was killed when
+# the agent was stopped). Companion of levers_rerun_head_v1s1.yaml; see there.
+name: levers-rerun-head-v2s42
 method: grid
 metric:
   name: val/acc@1
@@ -19,7 +17,7 @@ parameters:
   dataset_artifact:
     value: vandf-rxnorm-multi:v0
   dataset_subdir:
-    value: v1
+    value: v2
   train_sources:
     values: ["VANDF", "VANDF,MTHSPL"]
   aux:

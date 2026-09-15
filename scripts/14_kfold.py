@@ -146,7 +146,8 @@ def cmd_upload(args: argparse.Namespace) -> None:
 def add_recipe_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--train-sources", default="VANDF", help="e.g. VANDF,MTHSPL (the folder must carry the source)")
     p.add_argument("--aux", default="none", choices=["none", "strength"])
-    p.add_argument("--aux-weight", type=float, default=0.2)
+    p.add_argument("--aux-weight", type=float, default=0.01,
+                   help="the head weight the levers grid ran at (sweeps/levers.yaml, chosen by the pilot)")
     p.add_argument("--smoke", action="store_true", help="1 epoch on 256 pairs; nothing recorded")
     p.add_argument("--offline", action="store_true", help="WANDB_MODE=offline")
     p.add_argument("--from-artifact", nargs="?", const=f"{DATA_ARTIFACT}:v0", default=None, metavar="NAME:VERSION",

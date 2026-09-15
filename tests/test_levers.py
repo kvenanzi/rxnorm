@@ -237,7 +237,8 @@ def test_correct_pos_and_features_from_predictions():
 
 def test_levers_sweeps_are_well_formed():
     sweep = load("08_sweep")
-    for name in ("levers", "levers_control_steps", "levers_control_size"):
+    for name in ("levers", "levers_control_steps", "levers_control_size", "levers_rerun", "levers_rerun_head",
+                 "levers_rerun_head_v1s1", "levers_rerun_head_v2s42"):
         cfg = yaml.safe_load((ROOT / "sweeps" / f"{name}.yaml").read_text())
         assert isinstance(cfg["parameters"]["lr"]["value"], float)
         srcs = cfg["parameters"]["train_sources"]
@@ -249,3 +250,29 @@ def test_levers_sweeps_are_well_formed():
     for spec in grid.values():
         n *= len(spec.get("values", [1]))
     assert n == 48
+
+
+def test_levers_head_makeups_cover_the_lost_cells_with_the_grid_settings():
+    """nypttmi8 lost six head cells (v1/s42, v1/s1, v2/s42, both data arms); the
+    make-up grids re-issue exactly those, every fixed setting equal to the grid's."""
+    import itertools
+    grid = yaml.safe_load((ROOT / "sweeps" / "levers.yaml").read_text())["parameters"]
+    cells = set()
+    for name in ("levers_rerun_head", "levers_rerun_head_v1s1", "levers_rerun_head_v2s42"):
+        p = yaml.safe_load((ROOT / "sweeps" / f"{name}.yaml").read_text())["parameters"]
+        assert set(p) == set(grid), name
+        for k, spec in grid.items():
+            if "value" in spec:
+                assert p[k] == spec, (name, k)
+        vals = lambda k: p[k].get("values", [p[k].get("value")])
+        cells |= set(itertools.product(vals("dataset_subdir"), vals("seed"), vals("train_sources"), vals("aux")))
+    assert cells == {(k, s, src, "strength") for k, s in (("v1", 42), ("v1", 1), ("v2", 42))
+                     for src in ("VANDF", "VANDF,MTHSPL")}
+
+
+def test_kfold_head_weight_defaults_to_the_grid_weight():
+    import argparse
+    p = argparse.ArgumentParser()
+    kfold.add_recipe_flags(p)
+    grid = yaml.safe_load((ROOT / "sweeps" / "levers.yaml").read_text())["parameters"]
+    assert p.parse_args([]).aux_weight == grid["aux_weight"]["value"]
