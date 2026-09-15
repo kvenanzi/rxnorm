@@ -323,7 +323,7 @@ def fig_levers() -> dict:
         ax.set_title(title, loc="left", color=INK, fontsize=11)
         style(ax, xgrid=False)
         ax.yaxis.grid(True, color=GRID, linewidth=0.8); ax.set_axisbelow(True)
-    axes[0].legend(frameon=False, fontsize=8, loc="lower left", ncol=2)
+    axes[0].legend(frameon=False, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=4)   # below the axis: no place inside is clear of the points
     ax = axes[2]
     main = payload["stats"].get("main", {})
     names = [("data", "MTHSPL data"), ("head", "strength head"), ("interaction", "interaction")]
@@ -366,12 +366,12 @@ def fig_kfold() -> dict:
     lo, hi = oof["oof"]["wilson95"]
     ax.axhspan(lo, hi, color=SERIES[1], alpha=0.15, linewidth=0)
     ax.axhline(oof["oof"]["acc@1"], color=SERIES[1], linewidth=1.2, label=f"pooled out-of-fold {oof['oof']['acc@1']:.3f}")
-    for i, (a, n) in enumerate(zip(acc, ns)):
-        ax.text(i, a + 0.004, f"{a:.3f}\nn={n:,}", ha="center", fontsize=7, color=INK2)
-    ax.set_xticks(range(len(folds)), [f.replace("fold", "fold ") + ("\n(published test)" if f == "fold0" else "") for f in folds], fontsize=8)
+    # value and n go in the tick labels: above the bars they collide with the pooled band, inside they are wider than a bar
+    ax.set_xticks(range(len(folds)), [f"{f.replace('fold', 'fold ')}{' *' if f == 'fold0' else ''}\n{a:.3f}\n{n:,}"
+                                      for f, a, n in zip(folds, acc, ns)], fontsize=7)
     ax.set_ylim(min(acc) - 0.04, max(acc) + 0.03)
-    ax.set_title("Test acc@1 per fold", loc="left", color=INK, fontsize=11)
-    ax.legend(frameon=False, fontsize=8, loc="lower right")
+    ax.set_title("Test acc@1 per fold (* published test set)", loc="left", color=INK, fontsize=11)
+    ax.legend(frameon=False, fontsize=8, loc="upper right")
     style(ax, xgrid=False)
     out = {"folds": folds, "acc@1": acc, "n": ns, "oof": oof["oof"]}
     if cal:
