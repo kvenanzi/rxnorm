@@ -6,6 +6,7 @@ is flipped to public in each repo's Settings.
   uv run scripts/09_publish_hf.py --dry-run     # stage under outputs/hf/, upload nothing
   uv run scripts/09_publish_hf.py               # create/update both private repos
   uv run scripts/09_publish_hf.py --skip-dataset
+  uv run scripts/09_publish_hf.py --all-data      # the all-data model (docs/post-2), its own repo
 """
 
 import argparse
@@ -18,6 +19,9 @@ PROCESSED = ROOT / "data" / "processed"
 STAGE = ROOT / "outputs" / "hf"
 MODEL_REPO = "vandf-rxnorm-biencoder"
 DATASET_REPO = "vandf-rxnorm-pairs"
+ALL_DATA_REPO = "vandf-rxnorm-biencoder-all"
+# The version of the all-data model that carries the out-of-fold calibration (14_kfold.py attach-calibration).
+ALL_DATA_ARTIFACT = "kettle-labs/rxnorm-vandf/vandf-rxnorm-biencoder-final-all:calibrated"
 GITHUB = "https://github.com/kvenanzi/rxnorm"
 WANDB = "https://wandb.ai/kettle-labs/rxnorm-vandf"
 
@@ -125,9 +129,12 @@ Validation: acc@1 0.883, recall@5 0.961.
 
 The 0.931 is one draw of the ingredient split. Re-drawing the split five more
 times and retraining the same recipe gives test acc@1 **0.907 ± 0.019** (range
-0.874–0.931; the published split is the most favorable of the six), while the
-training seed moves it by 0.001. Read the headline as a band of about two
-points. Recall@5 (0.974–0.988) and the component accuracies barely move.
+0.874–0.931; the published split is the most favorable of the six), and
+seven-fold cross-validation by ingredient gives a pooled out-of-fold acc@1 of
+**0.894** (Wilson 95% 0.889–0.899, n = 12,227). The training seed contributes a
+standard deviation of about 0.0045 (two seeds on each of the six draws). Read
+the headline as a band of about two points. Recall@5 (0.974–0.988) and the
+component accuracies vary little across draws.
 
 **Abstention.** Thresholds chosen on validation, measured on test:
 
@@ -137,7 +144,11 @@ points. Recall@5 (0.974–0.988) and the component accuracies barely move.
 | + real drugs with no SCD/SBD (packs, ingredient-only) | platt (default) | 46.0% | 0.982 |
 
 The validation target was 99%; test lands at 98.2–98.8%. Treat the achieved
-number as the estimate, not the target.
+number as the estimate, not the target. In cross-validation of the same recipe,
+a 99% threshold fit on the pooled out-of-fold predictions (about 11,000 strings)
+achieved 98.6–99.8% on each held-out fold, which indicates that the shortfall
+here comes from choosing the threshold on one validation split of about 2,300
+strings.
 
 An 18-run sweep (3 encoders × 3 negative strategies × normalizer on/off) found
 the three effects roughly additive: domain pre-training (SapBERT vs general
@@ -146,13 +157,23 @@ hard negatives +3. The hard-negatives effect was then re-run on all six ingredie
 splits (18 runs): ingredient-matched negatives beat in-batch-only on every split, by
 1.6 points of test acc@1 on average (95% CI 0.8–2.4). Live charts: __WANDB__.
 
+A follow-up tested a second source vocabulary (the FDA label names), an
+auxiliary strength head, and cross-validation by ingredient; neither training
+change altered accuracy on VA strings. Write-up:
+https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/
+
+For mapping new strings, the same recipe trained on every ingredient family is
+published as https://huggingface.co/__NS__/vandf-rxnorm-biencoder-all (no test set
+of its own; cross-validated acc@1 0.894 on unseen ingredients).
+
 ## Limitations
 
-- **Trained and evaluated on VA strings only.** Other systems' drug names are a
-  different distribution; accuracy there is unmeasured.
-- **One split for calibration.** The abstention thresholds were chosen on one
-  validation draw; the six-split experiment covers accuracy, not calibration.
-  Re-choose thresholds on your own held-out data.
+- **Trained on VA strings only.** Other systems' drug names are a different
+  distribution. On FDA Structured Product Label names (MTHSPL) the same recipe
+  scores acc@1 0.709 ± 0.057 across twelve draw-and-seed runs; other
+  vocabularies are unmeasured.
+- **One split for calibration.** This model's abstention thresholds were chosen
+  on one validation draw. Re-choose thresholds on your own held-out data.
 - **Candidates are RxNorm 2026-09-08.** RxNorm changes monthly; rebuild
   `candidates.parquet` for a newer release (`scripts/03_build_dataset.py` in the repo).
 - **Not for unsupervised clinical use.** A 7% top-1 error rate on medication
@@ -313,6 +334,131 @@ content from restricted sources (SNOMED CT, GS, MMX, NDDF, MMSL) is included.
 """
 
 
+ALL_DATA_CARD = """---
+license: apache-2.0
+base_model: cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+library_name: sentence-transformers
+pipeline_tag: sentence-similarity
+language:
+- en
+tags:
+- rxnorm
+- vandf
+- drug-normalization
+- medication
+- entity-linking
+- sentence-transformers
+datasets:
+- __NS__/vandf-rxnorm-pairs
+---
+
+# VANDF → RxNorm clinical drug bi-encoder, trained on every ingredient family
+
+The recipe of [__NS__/vandf-rxnorm-biencoder](https://huggingface.co/__NS__/vandf-rxnorm-biencoder),
+trained on all 14,369 VA National Drug File (VANDF) strings that have a clinical
+drug in RxNorm, so that every ingredient family in the file is in training. It
+maps a VANDF drug string to the RxNorm **clinical drug** it names (SCD or SBD:
+ingredient, strength, and dose form), with a calibrated confidence for routing
+uncertain strings to review.
+
+This model has no test set of its own: every VA string was used for training.
+Its expected accuracy comes from seven-fold cross-validation of the recipe, and
+a comparison with the first model on strings neither model trained on (below).
+Write-up: https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/ (§5.4–5.5).
+
+## Usage
+
+```bash
+pip install "rxnorm-vandf @ git+__GITHUB__"
+```
+
+```python
+from rxnorm_vandf.infer import Mapper
+
+mapper = Mapper.from_pretrained("__NS__/vandf-rxnorm-biencoder-all")   # ~450 MB download
+for p in mapper.map(["METOPROLOL TARTRATE 12.5MG TAB", "CATHETER,FOLEY SILICONE 22FR 5CC"]):
+    print(p.rxcui, p.name, p.tty, f"{p.confidence:.2f}", "accept" if p.accept else "review")
+```
+
+`Mapper` loads the encoder, `train_config.json` (input preprocessing),
+`calibration.json` (score → probability), and `candidates.parquet` (the 27,287
+active RxNorm SCD/SBD names it searches) from this repo. The default acceptance
+threshold (0.961) was chosen on pooled out-of-fold predictions for 99% precision
+on a population that includes real drugs with no SCD/SBD; pass `threshold=` to
+change it.
+
+## Expected accuracy
+
+Seven folds of the ingredient hash used for the first model: each fold model
+trains the same recipe on five folds, selects its epoch on a sixth, and is
+tested once on the seventh. Pooled over the seven test folds:
+
+| | acc@1 | recall@5 | n |
+|---|---|---|---|
+| Pooled out-of-fold | **0.894** (Wilson 95% 0.889–0.899) | 0.975 | 12,227 VA strings |
+| Range over the seven folds | 0.864–0.932 | 0.960–0.988 | 1,533–1,890 per fold |
+
+This is the expected accuracy on strings whose ingredients are new to the model.
+The fold models' best epochs were 1, 1, 3, 3, 1, 3, and 1; this model trained for
+the median, one epoch.
+
+## Comparison with the first model
+
+Neither model trained on the FDA Structured Product Label names (MTHSPL), so
+those strings are held out from both:
+
+| Strings | n | First model | This model |
+|---|---|---|---|
+| FDA label names whose ingredients both models trained on | 28,464 | 0.729 | **0.753** |
+| FDA label names whose ingredients only this model trained on | 13,492 | 0.716 | **0.746** |
+| VA strings both models trained on | 9,287 | **0.939** | 0.909 |
+
+On the first row, 1,409 strings are answered correctly by this model alone and
+701 by the first model alone (exact sign test, p ≈ 2 × 10⁻⁵⁴). This model fits
+its own training strings less closely, as expected from one epoch of training,
+and is more accurate on strings that neither model saw.
+
+## Calibration
+
+A temperature (0.0386) and a Platt layer over [cosine, top-1 − top-2 margin, log
+softmax], fit on the pooled out-of-fold predictions of 12,227 matched VA strings
+and 819 real drugs with no SCD/SBD. Thresholds chosen on six folds and applied to
+the seventh:
+
+| Target | Threshold (pooled) | Precision on the held-out fold | Coverage |
+|---|---|---|---|
+| 95% | 0.735 | 0.922–0.967 | about 0.81 |
+| **99% (default)** | **0.961** | **0.986–0.998** | about 0.50 |
+
+The 99% threshold transfers across held-out ingredients more reliably than the
+95% one. Re-choose thresholds on your own held-out data.
+
+## Training
+
+- Base model: [SapBERT](https://huggingface.co/cambridgeltl/SapBERT-from-PubMedBERT-fulltext)
+- `MultipleNegativesRankingLoss` on (VA string, RxNorm name, hard negative)
+  triplets; the hard negative has the same ingredients and a different strength
+  or dose form. The deterministic strength normalizer of the first model.
+- 1 epoch, batch 64, lr 2e-5, 10% warmup, fp16, max_seq_length 96, seed 42, one
+  Colab A100
+- Data: every VANDF string with an SCD/SBD in RxNorm 2026-09-08 (14,369 strings,
+  14,372 pairs); no ingredient is held out.
+
+## Limitations
+
+- **No test set of its own.** The accuracy above is estimated by cross-validation
+  of the recipe (one partition, one seed), not measured on this model.
+- **Trained on VA strings only.** On FDA label names acc@1 is about 0.75; other
+  vocabularies are unmeasured.
+- **Candidates are RxNorm 2026-09-08.** RxNorm changes monthly; rebuild
+  `candidates.parquet` for a newer release (`scripts/03_build_dataset.py` in the repo).
+- **Not for unsupervised clinical use.** Use the confidence to route uncertain
+  strings to a pharmacist, or use the top-5 as suggestions.
+
+Code: __GITHUB__ · Runs: __WANDB__
+"""
+
+
 def fill(text: str, namespace: str) -> str:
     return text.replace("__NS__", namespace).replace("__GITHUB__", GITHUB).replace("__WANDB__", WANDB)
 
@@ -350,12 +496,34 @@ def stage_dataset(namespace: str) -> Path:
     return dst
 
 
+
+def stage_all_data(namespace: str) -> Path:
+    """The all-data model from its W&B artifact (the version with calibration.json) and the candidate pool."""
+    import json
+    import wandb
+    dst = STAGE / "model-all"
+    if dst.exists():
+        shutil.rmtree(dst)
+    wandb.Api().artifact(ALL_DATA_ARTIFACT).download(root=str(dst))
+    shutil.copy(PROCESSED / "candidates.parquet", dst / "candidates.parquet")
+    for required in ("train_config.json", "calibration.json", "candidates.parquet", "model.safetensors"):
+        assert (dst / required).exists(), f"missing {required}"
+    cfg = json.loads((dst / "train_config.json").read_text())
+    cfg["data_dir"] = None
+    cfg["output_dir"] = "models"
+    (dst / "train_config.json").write_text(json.dumps(cfg, indent=2) + "\n")
+    (dst / "README.md").write_text(fill(ALL_DATA_CARD, namespace))   # replaces the auto-generated card
+    return dst
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="stage only; upload nothing")
     ap.add_argument("--namespace", help="HF user or org (default: the token's user)")
     ap.add_argument("--skip-model", action="store_true")
     ap.add_argument("--skip-dataset", action="store_true")
+    ap.add_argument("--all-data", action="store_true",
+                    help=f"publish only the all-data model (docs/post-2) to <namespace>/{ALL_DATA_REPO}")
     args = ap.parse_args()
 
     from huggingface_hub import HfApi
@@ -363,9 +531,11 @@ def main() -> None:
     namespace = args.namespace or ("<namespace>" if args.dry_run else api.whoami()["name"])
 
     jobs = []
-    if not args.skip_model:
+    if args.all_data:
+        jobs.append(("model", f"{namespace}/{ALL_DATA_REPO}", stage_all_data(namespace)))
+    elif not args.skip_model:
         jobs.append(("model", f"{namespace}/{MODEL_REPO}", stage_model(namespace)))
-    if not args.skip_dataset:
+    if not args.skip_dataset and not args.all_data:
         jobs.append(("dataset", f"{namespace}/{DATASET_REPO}", stage_dataset(namespace)))
 
     for repo_type, repo_id, folder in jobs:

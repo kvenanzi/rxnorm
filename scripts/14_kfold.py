@@ -24,6 +24,7 @@ the winning arm of scripts/13_levers.py, e.g. --train-sources VANDF,MTHSPL --aux
   uv run scripts/14_kfold.py oof                       # pooled out-of-fold table from W&B
   uv run scripts/14_kfold.py calibrate-oof             # calibration.json + threshold transfer across folds
   uv run scripts/14_kfold.py attach-calibration        # that calibration.json into the all-data model artifact
+  uv run scripts/14_kfold.py compare                   # all-data vs published model on strings neither trained on
 In Colab (notebooks/06_kfold.ipynb):  python scripts/14_kfold.py train --from-artifact; then final --from-artifact
 """
 
@@ -464,6 +465,71 @@ def cmd_attach_calibration(args: argparse.Namespace) -> None:
     print(f"logged {MODEL_ARTIFACT} ({source} + {rel(cal)}); files in {rel(d)}")
 
 
+PUBLISHED_MODEL = ROOT / "models" / "sapbert-ingredient-strength-final" / "best"   # Part I's model (09_publish_hf.py)
+
+
+def cmd_compare(args: argparse.Namespace) -> None:
+    """The all-data model against Part I's published model. Neither trained on an SPL string, so
+    the SPL strings of the published draw are held out from both; they are split by whether their
+    ingredients were in that draw's training split (both models trained on the family) or not
+    (only the all-data model did). VA strings of the published split are shown for reference.
+    Paired: strings only one model answers correctly, and an exact sign test on them."""
+    import gc
+
+    import pandas as pd
+    import torch
+    from scipy.stats import binomtest
+    from sentence_transformers import SentenceTransformer
+
+    from rxnorm_vandf.infer import Mapper
+    from rxnorm_vandf.train import TrainConfig
+
+    final_dir = MODELS_DIR / FINAL_RUN / "best"
+    if not (final_dir / "calibration.json").exists():
+        raise SystemExit(f"{rel(final_dir)} has no calibration.json; `14_kfold.py attach-calibration` downloads it there")
+    models = {"published": PUBLISHED_MODEL, "all-data": final_dir}
+    cand = pd.read_parquet(ROOT / "data" / "processed" / "candidates.parquet")
+    pairs = pd.read_parquet(ROOT / "data" / "multi" / _seeds.PUBLISHED_SPLIT / "pairs.parquet")
+    g = (pairs.groupby(["source", "vandf_string"])
+         .agg(split=("split", "first"), n_splits=("split", "nunique"), truth=("target_rxcui", lambda t: set(map(str, t))))
+         .reset_index())
+    g = g[(g.n_splits == 1) & (g.split != "mixed")]
+    sets = {"SPL, ingredients in the published training split (held out from both models)": g[(g.source == "MTHSPL") & (g.split == "train")],
+            "SPL, ingredients in the published val/test splits (seen only by the all-data model)": g[(g.source == "MTHSPL") & g.split.isin(["val", "test"])],
+            "VA, published training split (trained on by both)": g[(g.source == "VANDF") & (g.split == "train")],
+            "VA, published test split (held out from the published model only)": g[(g.source == "VANDF") & (g.split == "test")]}
+    hits = {}
+    for name, path in models.items():
+        cfg = TrainConfig(**json.loads((path / "train_config.json").read_text()))
+        st = SentenceTransformer(str(path)); st.max_seq_length = cfg.max_seq_length
+        mapper = Mapper(st, cfg, json.loads((path / "calibration.json").read_text()), cand)
+        for sname, df in sets.items():
+            strings, truth, h = df["vandf_string"].tolist(), df["truth"].tolist(), []
+            for i in range(0, len(strings), 2000):
+                h += [p.rxcui in t for p, t in zip(mapper.map(strings[i:i + 2000], top_k=1), truth[i:i + 2000])]
+            hits[(name, sname)] = h
+            print(f"{name:9} {sname}: acc@1 {sum(h) / len(h):.4f} (n {len(h):,})", flush=True)
+        del mapper, st
+        gc.collect(); torch.cuda.empty_cache()
+    rows = {}
+    for sname in sets:
+        a, b = hits[("published", sname)], hits[("all-data", sname)]
+        only_pub = sum(x and not y for x, y in zip(a, b)); only_all = sum(y and not x for x, y in zip(a, b))
+        rows[sname] = {"n": len(a), "published": sum(a) / len(a), "all-data": sum(b) / len(b),
+                       "only_published": only_pub, "only_all_data": only_all,
+                       "sign_test_p": binomtest(only_all, only_pub + only_all, 0.5).pvalue if only_pub + only_all else None}
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "compare.json").write_text(json.dumps(rows, indent=2) + "\n")
+    md = ["| strings | n | published model | all-data model | difference | right only by published | right only by all-data | sign test p |",
+          "|---|---|---|---|---|---|---|---|"]
+    for sname, r in rows.items():
+        md.append(f"| {sname} | {r['n']:,} | {r['published']:.4f} | {r['all-data']:.4f} | {r['all-data'] - r['published']:+.4f} | "
+                  f"{r['only_published']:,} | {r['only_all_data']:,} | {r['sign_test_p']:.1e} |")
+    (OUT / "compare.md").write_text("\n".join(md) + "\n")
+    print("\n".join(md))
+    print(f"wrote {rel(OUT / 'compare.json')} and compare.md")
+
+
 def render_calibration(r: dict) -> str:
     f3 = lambda v: "–" if v is None else f"{v:.3f}"
     lines = [f"Pooled out-of-fold calibration (+hard population, n = {r['n']:,}: {r['n_matched']:,} matched + {r['n_hard']:,} hard "
@@ -492,6 +558,7 @@ def main() -> None:
     sub.add_parser("upload").set_defaults(fn=cmd_upload)
     t = sub.add_parser("train"); t.add_argument("--only", choices=FOLDS); add_recipe_flags(t); t.set_defaults(fn=cmd_train)
     f = sub.add_parser("final"); f.add_argument("--epochs", type=int, default=None); add_recipe_flags(f); f.set_defaults(fn=cmd_final)
+    sub.add_parser("compare").set_defaults(fn=cmd_compare)
     a = sub.add_parser("attach-calibration"); a.add_argument("--version", default="v0", help="model artifact version to add it to")
     a.set_defaults(fn=cmd_attach_calibration)
     o = sub.add_parser("_one"); o.add_argument("job", choices=FOLDS + [ALL]); o.add_argument("--epochs", type=int, default=None)
