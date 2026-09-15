@@ -276,3 +276,13 @@ def test_kfold_head_weight_defaults_to_the_grid_weight():
     kfold.add_recipe_flags(p)
     grid = yaml.safe_load((ROOT / "sweeps" / "levers.yaml").read_text())["parameters"]
     assert p.parse_args([]).aux_weight == grid["aux_weight"]["value"]
+
+
+def test_kfold_train_config_builds_for_a_fold_and_the_final_job():
+    import argparse
+    ns = lambda **kw: argparse.Namespace(**{"train_sources": "VANDF", "aux": "none", "aux_weight": 0.01, "smoke": False,
+                                            "offline": False, "from_artifact": None, "epochs": None, **kw})
+    fold = kfold.train_config(ns(job="fold0"))
+    assert fold.epochs == kfold.FINAL["epochs"] and not fold.log_model and fold.data_dir.endswith("fold0")
+    final = kfold.train_config(ns(job="all", epochs=3, from_artifact="vandf-rxnorm-kfold:v0"))
+    assert final.epochs == 3 and final.log_model and final.data_dir is None and final.dataset_subdir == "all"

@@ -197,29 +197,38 @@ def median_best_epoch() -> int:
     return int(round(statistics.median(epochs)))
 
 
-def cmd_one(args: argparse.Namespace) -> None:
-    import wandb
-    from rxnorm_vandf.train import TrainConfig, train
+def train_config(args: argparse.Namespace):
+    """The TrainConfig of one fold, or of the all-data job, under the recipe flags.
+    FINAL carries `epochs`, so --epochs (the final job's median) overrides it here
+    rather than being passed twice."""
+    from rxnorm_vandf.train import TrainConfig
 
-    if args.offline:
-        os.environ["WANDB_MODE"] = "offline"
     job = args.job
-    name = run_name(job) + ("-smoke" if args.smoke else "")
     final = job == ALL
-    cfg = TrainConfig(**recipe_of(args), seed=42, smoke=args.smoke,
-                      epochs=args.epochs or FINAL["epochs"],
+    cfg = TrainConfig(**{**recipe_of(args), "epochs": args.epochs or FINAL["epochs"]}, seed=42, smoke=args.smoke,
                       log_model=final and not args.smoke, model_artifact=MODEL_ARTIFACT,
                       log_predictions=True,
                       output_dir=str(MODELS_DIR / "smoke" if args.smoke else MODELS_DIR),
-                      run_name=name, group=GROUP,
+                      run_name=run_name(job) + ("-smoke" if args.smoke else ""), group=GROUP,
                       tags=[GROUP, "final-all" if final else job])
     if args.from_artifact:
         cfg.data_dir, cfg.dataset_artifact, cfg.dataset_subdir = None, args.from_artifact, job
     else:
         cfg.data_dir = str(folder(job))
+    return cfg
+
+
+def cmd_one(args: argparse.Namespace) -> None:
+    import wandb  # noqa: F401  (fail before training if it is missing)
+    from rxnorm_vandf.train import train
+
+    if args.offline:
+        os.environ["WANDB_MODE"] = "offline"
+    job = args.job
+    cfg = train_config(args)
     train(cfg)
     if not args.smoke:
-        append_ledger({"job": job, "run_name": name, "recipe": recipe_of(args), "epochs": cfg.epochs,
+        append_ledger({"job": job, "run_name": cfg.run_name, "recipe": recipe_of(args), "epochs": cfg.epochs,
                        "run_id": _seeds.latest_run_id(), "state": "finished",
                        "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
 
