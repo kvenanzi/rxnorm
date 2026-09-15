@@ -9,9 +9,12 @@
    curves. Prints the URL. Edit the prose in the W&B editor; panels stay live.
 
 Run from the repo root:  uv run scripts/10_report.py [--skip-data]
+The follow-up's report:  uv run scripts/10_report.py --part 2   (tables from outputs/levers and outputs/kfold)
 """
 
 import argparse
+import json
+from pathlib import Path
 
 import wandb
 import wandb_workspaces.reports.v2 as wr
@@ -236,20 +239,201 @@ def build_report() -> wr.Report:
     return blocks
 
 
+# ------------------------------------------------------------- Part II (docs/post-2)
+
+ROOT = Path(__file__).resolve().parent.parent
+PART1_POST = "https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/"
+PART2_POST = "https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/"
+PART1_REPORT = ("https://wandb.ai/kettle-labs/rxnorm-vandf/reports/"
+                "VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA")
+LEVERS_TITLE = "VANDF → RxNorm, Part II: a second source vocabulary, a strength head, and cross-validation by ingredient"
+LEVERS_DESCRIPTION = ("Two training interventions as a paired 2 × 2 grid over six ingredient draws and two seeds, "
+                      "two controls, and seven-fold cross-validation with calibration on out-of-fold predictions.")
+PILOT_RUNS = ["lqf7dett", "tiotc7iy", "9zw6jvov", "0usjnp44", "spja8f8i"]   # Part I's split-v1 run, then weights 0.01..0.5
+CONTROL_RUNS = ["us4peb8v", "vxkly49t", "u4pby8j3", "b9lti8jv"]            # steps v1, v4; size v1, v4
+ARM_LABELS = {"base": "VA only", "mthspl": "+ SPL", "aux": "+ head", "both": "+ SPL + head"}
+
+
+def ci(d: dict) -> str:
+    lo, hi = d["ci95"]
+    return f"{lo:+.3f} to {hi:+.3f}"
+
+
+def levers_tables() -> dict:
+    """Markdown tables for the Part II report, built from the analysis outputs, and the run ids
+    each panel is bound to (the grid's by the cell each run fills, so failed and superseded runs
+    never appear)."""
+    lev = json.loads((ROOT / "outputs" / "levers" / "levers.json").read_text())
+    oof = json.loads((ROOT / "outputs" / "kfold" / "oof.json").read_text())
+    cal = json.loads((ROOT / "outputs" / "kfold" / "calibration_oof.json").read_text())
+    cells, main = lev["cells"], lev["stats"]["main"]
+    effects = ["| effect | metric | mean | 95% CI | units positive |", "|---|---|---|---|---|"]
+    for key, label in (("data", "SPL strings"), ("head", "strength head"), ("interaction", "interaction")):
+        for m, mlabel in (("test/acc@1", "VA test acc@1"), ("val/acc@1", "VA val acc@1"),
+                          ("test/strength_acc", "VA test strength accuracy"), ("test_mthspl/acc@1", "SPL test acc@1")):
+            d = main[m][key]
+            effects.append(f"| {label} | {mlabel} | {d['mean']:+.4f} | {ci(d)} | {d['n_pos']} / {d['n_runs']} |")
+    arms = ["| arm (12 runs each) | VA test acc@1 | VA val acc@1 | SPL test acc@1 |", "|---|---|---|---|"]
+    for a, label in ARM_LABELS.items():
+        per = lev["stats"]["arm_means"][a]
+        arms.append(f"| {label} | " + " | ".join(f"{per[m]['mean']:.3f} ± {per[m]['sd']:.3f}"
+                                                 for m in ("test/acc@1", "val/acc@1", "test_mthspl/acc@1")) + " |")
+    metrics = ("test/acc@1", "val/acc@1", "test_mthspl/acc@1")
+    controls = ["| run (seed 42) | v1 VA test | v1 VA val | v1 SPL test | v4 VA test | v4 VA val | v4 SPL test |",
+                "|---|---|---|---|---|---|---|"]
+    for label, per in (("VA only, 4 epochs", {k: cells[f"{k}/s42/base"] for k in ("v1", "v4")}),
+                       ("VA + all SPL, 4 epochs", {k: cells[f"{k}/s42/mthspl"] for k in ("v1", "v4")}),
+                       ("VA only, 16 epochs (steps control)", {k: lev["controls"]["steps"][k]["control"] for k in ("v1", "v4")}),
+                       ("VA + 9,300 SPL, 4 epochs (size control)", {k: lev["controls"]["size"][k]["control"] for k in ("v1", "v4")})):
+        controls.append(f"| {label} | " + " | ".join(f"{per[k][m]:.3f}" for k in ("v1", "v4") for m in metrics) + " |")
+    folds = ["| fold | test n | best epoch | val acc@1 | test acc@1 | test recall@5 |", "|---|---|---|---|---|---|"]
+    for f, r in oof["folds"].items():
+        folds.append(f"| {f}{' (published test set)' if f == 'fold0' else ''} | {r['test/n']:,} | {r['best_epoch']} | "
+                     f"{r['val/acc@1']:.3f} | {r['test/acc@1']:.3f} | {r['test/recall@5']:.3f} |")
+    o = oof["oof"]
+    folds.append(f"| **pooled out-of-fold** | {o['n']:,} | | | **{o['acc@1']:.3f}** "
+                 f"(Wilson 95% {o['wilson95'][0]:.3f}–{o['wilson95'][1]:.3f}) | {o['recall@5']:.3f} |")
+    calib = ["| target | precision, threshold chosen on the other six folds: mean ± sd (range) | coverage | "
+             "precision, threshold from one fold applied to another: mean (minimum) |", "|---|---|---|---|"]
+    for key in ("p95", "p99"):
+        lofo, tr = cal["leave_one_fold_out"][key], cal["transfer"][key]
+        precs = [v["precision"] for f, v in lofo.items() if f.startswith("fold")]
+        calib.append(f"| {key[1:]}% | {lofo['precision']['mean']:.3f} ± {lofo['precision']['sd']:.3f} "
+                     f"({min(precs):.3f}–{max(precs):.3f}) | {lofo['coverage']['mean']:.3f} | "
+                     f"{tr['off_diagonal_mean']:.3f} ({tr['off_diagonal_min']:.3f}) |")
+    return {"effects": "\n".join(effects), "arms": "\n".join(arms), "controls": "\n".join(controls),
+            "folds": "\n".join(folds), "calibration": "\n".join(calib),
+            "grid_ids": [v["run_id"] for v in cells.values()],
+            "control_ids": CONTROL_RUNS + [cells[f"{k}/s42/{a}"]["run_id"] for k in ("v1", "v4") for a in ("base", "mthspl")],
+            "fold_ids": [r["run_id"] for r in oof["folds"].values()],
+            "n_cells": len(cells)}
+
+
+def build_levers_report() -> list:
+    t = levers_tables()
+    assert t["n_cells"] == 48, f"the grid has {t['n_cells']} of 48 cells; run 13_levers.py summarize first"
+    grid = wr.Runset(entity=ENTITY, project=PROJECT, name="Grid (48 runs)", filters=ids_filter(t["grid_ids"]))
+    controls = wr.Runset(entity=ENTITY, project=PROJECT, name="Controls and the grid cells they are compared with",
+                         filters=ids_filter(t["control_ids"]))
+    folds = wr.Runset(entity=ENTITY, project=PROJECT, name="Fold models (7 runs)", filters=ids_filter(t["fold_ids"]))
+    pilot = wr.Runset(entity=ENTITY, project=PROJECT, name="Head-weight pilot and its reference (5 runs)",
+                      filters=ids_filter(PILOT_RUNS))
+    W = 24
+    return [
+        wr.TableOfContents(),
+        wr.P(["This report holds the runs behind ", wr.Link(text="Part II of the write-up", url=PART2_POST),
+              ", which follows ", wr.Link(text="Part I", url=PART1_POST), " and ",
+              wr.Link(text="its report", url=PART1_REPORT), ". Code: ", wr.Link(text="GitHub", url=GITHUB), "."]),
+
+        wr.H1("Design"),
+        wr.P("Part I's recipe (SapBERT fine-tuned with an in-batch softmax loss, ingredient-matched hard negatives, and "
+             "a strength normalizer) is crossed with two training interventions. The first adds the FDA Structured "
+             "Product Label names (MTHSPL), the only large RxNorm source at UMLS restriction level 0 besides the two "
+             "already used, as training strings. The second adds an auxiliary strength-classification head on the "
+             "query embedding, at loss weight 0.01. Each of the four arms is trained on the six ingredient draws of "
+             "Part I at seeds 42 and 1, so every contrast is paired within a (draw, seed) unit and reported over "
+             "twelve units. The VA validation and test sets are those of Part I; the SPL strings of each draw are "
+             "scored under separate keys (val_mthspl, test_mthspl)."),
+
+        wr.H1("The grid"),
+        wr.MarkdownBlock("Main effects, each the mean of its two simple contrasts within a unit, with t intervals "
+                         "over the twelve units:\n\n" + t["effects"] + "\n\nArm means over the twelve units:\n\n"
+                         + t["arms"] + "\n\nNeither intervention changes accuracy on VA strings. The head lowers "
+                         "validation accuracy on all twelve units and leaves strength accuracy unchanged. The SPL "
+                         "strings raise accuracy on held-out SPL strings on all twelve units."),
+        wr.PanelGrid(runsets=[grid], panels=[
+            wr.ParallelCoordinatesPlot(title="Draw × seed × training sources × head", columns=[
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("dataset_subdir"), display_name="draw"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("seed"), display_name="seed"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("train_sources"), display_name="training sources"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.Config("aux"), display_name="head"),
+                wr.ParallelCoordinatesPlotColumn(metric=wr.SummaryMetric("test/acc@1")),
+            ], layout=wr.Layout(x=0, y=0, w=W, h=10)),
+            wr.BarPlot(title="VA test acc@1 by training sources (mean of 24 runs)", metrics=["test/acc@1"],
+                       groupby="train_sources", groupby_aggfunc="mean", layout=wr.Layout(x=0, y=10, w=W // 2, h=8)),
+            wr.BarPlot(title="VA test acc@1 by head (mean of 24 runs)", metrics=["test/acc@1"],
+                       groupby="aux", groupby_aggfunc="mean", layout=wr.Layout(x=W // 2, y=10, w=W // 2, h=8)),
+            wr.BarPlot(title="SPL test acc@1 by training sources (mean of 24 runs)", metrics=["test_mthspl/acc@1"],
+                       groupby="train_sources", groupby_aggfunc="mean", layout=wr.Layout(x=0, y=18, w=W // 2, h=8)),
+            wr.BarPlot(title="VA test strength accuracy by head (mean of 24 runs)", metrics=["test/strength_acc"],
+                       groupby="aux", groupby_aggfunc="mean", layout=wr.Layout(x=W // 2, y=18, w=W // 2, h=8)),
+        ]),
+        wr.H2("Seed variation"),
+        wr.P("Two seeds per draw and arm give 24 same-draw pairs. The seed contributes a standard deviation of 0.0045 "
+             "to a single run's VA test acc@1, against a between-draw standard deviation of 0.018 for the VA-only "
+             "arm. Part I's estimate of 0.001 came from three seeds on one draw on a GTX 1070. Re-runs at the same "
+             "seed on the A100 agree to within 0.0005."),
+
+        wr.H1("Controls"),
+        wr.MarkdownBlock("One run per control at seed 42 on draws v1 and v4, with the grid cells they are compared "
+                         "with. The steps control trains on VA strings for sixteen epochs, about the SPL arm's number "
+                         "of optimizer steps; the size control adds 9,300 SPL rows, as many as there are VA rows.\n\n"
+                         + t["controls"] + "\n\nOn SPL strings the size control retains the whole transfer increase, "
+                         "and the steps control lowers transfer below the VA-only arm. On VA strings the differences "
+                         "are single runs of the order of the seed variation."),
+        wr.PanelGrid(runsets=[controls], panels=[
+            wr.BarPlot(title="VA test acc@1", metrics=["test/acc@1"], layout=wr.Layout(x=0, y=0, w=W // 2, h=8)),
+            wr.BarPlot(title="SPL test acc@1", metrics=["test_mthspl/acc@1"], layout=wr.Layout(x=W // 2, y=0, w=W // 2, h=8)),
+            wr.RunComparer(diff_only=True, layout=wr.Layout(x=0, y=8, w=W, h=10)),
+        ]),
+
+        wr.H1("Cross-validation by ingredient"),
+        wr.MarkdownBlock("Seven folds of Part I's ingredient hash; fold 0's test set is the published test set. Each "
+                         "fold model trains the VA-only recipe at seed 42 and selects its epoch on the next fold. The "
+                         "all-data model trains on every ingredient family for the median best epoch, which is 1.\n\n"
+                         + t["folds"]),
+        wr.PanelGrid(runsets=[folds], panels=[
+            wr.BarPlot(title="Test acc@1 by fold", metrics=["test/acc@1"], layout=wr.Layout(x=0, y=0, w=W // 2, h=8)),
+            wr.LinePlot(title="Validation acc@1 by epoch", x="epoch", y=["val/acc@1"],
+                        layout=wr.Layout(x=W // 2, y=0, w=W // 2, h=8)),
+        ]),
+        wr.H2("Calibration on out-of-fold predictions"),
+        wr.MarkdownBlock("Temperature and Platt layer fit on the pooled out-of-fold predictions of the +hard "
+                         "population (12,227 matched and 819 hard unmatched strings). Each held-out value chooses the "
+                         "threshold on some folds and measures precision on another.\n\n" + t["calibration"]
+                         + "\n\nIn Part I the 99% target, with the threshold chosen on one validation split, achieved "
+                         "0.982 on the +hard test population."),
+
+        wr.H1("The head-weight pilot"),
+        wr.P("Four head weights on the published draw at seed 42, VA strings only, on the GTX 1070, against the Part I "
+             "run on the same draw. Validation accuracy falls as the weight rises, and strength accuracy does not "
+             "change at any weight; the grid runs the head at 0.01."),
+        wr.PanelGrid(runsets=[pilot], panels=[
+            wr.LinePlot(title="Validation acc@1 by epoch", x="epoch", y=["val/acc@1"],
+                        layout=wr.Layout(x=0, y=0, w=W // 2, h=8)),
+            wr.BarPlot(title="Best validation acc@1", metrics=["val/acc@1"], layout=wr.Layout(x=W // 2, y=0, w=W // 2, h=8)),
+        ]),
+
+        wr.H1("Limitations"),
+        wr.UnorderedList(items=[
+            "Two seeds per draw; the seed's standard deviation of 0.0045 enters every contrast between arms that do "
+            "not share batches, which includes the SPL contrast.",
+            "The controls are single runs on two draws.",
+            "One head weight, 0.01.",
+            "The folds are one partition at one seed; 15% of VA strings, combination drugs whose ingredients fall in "
+            "different folds, are never tested.",
+            "RxNorm 2026-09-08; two naming conventions, the VA's and the FDA label names.",
+        ]),
+    ]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--skip-data", action="store_true", help="don't re-log the report-data run")
+    ap.add_argument("--part", type=int, choices=[1, 2], default=1,
+                    help="1: the first write-up's report; 2: the follow-up's (docs/post-2)")
+    ap.add_argument("--skip-data", action="store_true", help="don't re-log the report-data run (part 1)")
     ap.add_argument("--url", help="update this existing report in place; replaces every block, "
                                   "including prose edited in the W&B editor")
     args = ap.parse_args()
-    if not args.skip_data:
+    title, description, build = ((TITLE, DESCRIPTION, build_report) if args.part == 1
+                                 else (LEVERS_TITLE, LEVERS_DESCRIPTION, build_levers_report))
+    if args.part == 1 and not args.skip_data:
         log_report_data()
     if args.url:
         report = wr.Report.from_url(args.url)
-        report.blocks = build_report()
+        report.blocks = build()
     else:
-        report = wr.Report(entity=ENTITY, project=PROJECT, title=TITLE, description=DESCRIPTION,
-                           blocks=build_report())
+        report = wr.Report(entity=ENTITY, project=PROJECT, title=title, description=description, blocks=build())
     report.save()
     print(f"\nreport: {report.url}")
 

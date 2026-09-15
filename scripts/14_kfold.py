@@ -23,6 +23,7 @@ the winning arm of scripts/13_levers.py, e.g. --train-sources VANDF,MTHSPL --aux
   uv run scripts/14_kfold.py final [--epochs N] [--from-artifact] [recipe flags]
   uv run scripts/14_kfold.py oof                       # pooled out-of-fold table from W&B
   uv run scripts/14_kfold.py calibrate-oof             # calibration.json + threshold transfer across folds
+  uv run scripts/14_kfold.py attach-calibration        # that calibration.json into the all-data model artifact
 In Colab (notebooks/06_kfold.ipynb):  python scripts/14_kfold.py train --from-artifact; then final --from-artifact
 """
 
@@ -433,6 +434,36 @@ def cmd_calibrate_oof(args: argparse.Namespace) -> None:
     print(f"wrote {rel(OUT / 'calibration.json')}, calibration_oof.json, calibration.md")
 
 
+def cmd_attach_calibration(args: argparse.Namespace) -> None:
+    """The all-data model is trained and logged on Colab before the out-of-fold calibration
+    exists, so its artifact has no calibration.json, which Mapper.from_pretrained and the
+    Hugging Face staging both require. Log the weights again with the pooled out-of-fold
+    calibration.json beside them, as the next version of the same artifact."""
+    import shutil
+    import wandb
+    from rxnorm_vandf import WANDB_PROJECT
+
+    cal = OUT / "calibration.json"
+    if not cal.exists():
+        raise SystemExit("run `14_kfold.py calibrate-oof` first")
+    source = f"{MODEL_ARTIFACT}:{args.version}"
+    run = wandb.init(project=WANDB_PROJECT, job_type="calibration", name="attach-calibration-final-all",
+                     group=GROUP, config={"source_artifact": source})
+    src = run.use_artifact(source)
+    d = MODELS_DIR / FINAL_RUN / "best"
+    src.download(root=str(d))
+    shutil.copy(cal, d / "calibration.json")
+    art = wandb.Artifact(MODEL_ARTIFACT, type="model",
+                         description="The all-data model (every ingredient family, the VA-only recipe) with the "
+                                     "calibration fit on the pooled out-of-fold predictions (scripts/14_kfold.py).",
+                         metadata={**src.metadata, "calibration": json.loads(cal.read_text()),
+                                   "calibration_source": "pooled out-of-fold predictions, 14_kfold.py calibrate-oof"})
+    art.add_dir(str(d))
+    run.log_artifact(art, aliases=["latest", "calibrated"])
+    run.finish()
+    print(f"logged {MODEL_ARTIFACT} ({source} + {rel(cal)}); files in {rel(d)}")
+
+
 def render_calibration(r: dict) -> str:
     f3 = lambda v: "–" if v is None else f"{v:.3f}"
     lines = [f"Pooled out-of-fold calibration (+hard population, n = {r['n']:,}: {r['n_matched']:,} matched + {r['n_hard']:,} hard "
@@ -461,6 +492,8 @@ def main() -> None:
     sub.add_parser("upload").set_defaults(fn=cmd_upload)
     t = sub.add_parser("train"); t.add_argument("--only", choices=FOLDS); add_recipe_flags(t); t.set_defaults(fn=cmd_train)
     f = sub.add_parser("final"); f.add_argument("--epochs", type=int, default=None); add_recipe_flags(f); f.set_defaults(fn=cmd_final)
+    a = sub.add_parser("attach-calibration"); a.add_argument("--version", default="v0", help="model artifact version to add it to")
+    a.set_defaults(fn=cmd_attach_calibration)
     o = sub.add_parser("_one"); o.add_argument("job", choices=FOLDS + [ALL]); o.add_argument("--epochs", type=int, default=None)
     add_recipe_flags(o); o.set_defaults(fn=cmd_one)
     sub.add_parser("oof").set_defaults(fn=cmd_oof)
