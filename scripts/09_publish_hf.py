@@ -253,6 +253,9 @@ release by `scripts/03_build_dataset.py` in __GITHUB__.
 The labels are NLM's own: a VANDF atom and an RXNORM SCD/SBD atom that share an
 RXCUI are the same drug. Nothing was hand-annotated. No PHI.
 
+The model trained on it, and how the split was chosen, are described in the
+write-up: https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/
+
 ## Files
 
 | File | Rows | One row per |
