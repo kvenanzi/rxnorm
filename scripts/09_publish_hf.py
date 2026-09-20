@@ -75,7 +75,7 @@ confidence so you can auto-accept the sure cases and route the rest to review.
 Published tools such as RxMap normalize to the *ingredient* level (IN/MIN).
 This model targets the full clinical drug, where a miss on strength or dose
 form is a wrong answer. Method, hypotheses, the full sweep, and the error
-analysis are in the write-up: https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/
+analysis are in the write-up: https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/
 
 ## Usage
 
@@ -160,7 +160,7 @@ splits (18 runs): ingredient-matched negatives beat in-batch-only on every split
 A follow-up tested a second source vocabulary (the FDA label names), an
 auxiliary strength head, and cross-validation by ingredient; neither training
 change altered accuracy on VA strings. Write-up:
-https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/
+https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/
 
 For mapping new strings, the same recipe trained on every ingredient family is
 published as https://huggingface.co/__NS__/vandf-rxnorm-biencoder-all (no test set
@@ -254,7 +254,7 @@ The labels are NLM's own: a VANDF atom and an RXNORM SCD/SBD atom that share an
 RXCUI are the same drug. Nothing was hand-annotated. No PHI.
 
 The model trained on it, and how the split was chosen, are described in the
-write-up: https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/
+write-up: https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/
 
 ## Files
 
@@ -367,7 +367,7 @@ uncertain strings to review.
 This model has no test set of its own: every VA string was used for training.
 Its expected accuracy comes from seven-fold cross-validation of the recipe, and
 a comparison with the first model on strings neither model trained on (below).
-Write-up: https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/ (§5.4–5.5).
+Write-up: https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/ (§5.4–5.5).
 
 ## Usage
 

@@ -242,8 +242,8 @@ def build_report() -> wr.Report:
 # ------------------------------------------------------------- Part II (docs/post-2)
 
 ROOT = Path(__file__).resolve().parent.parent
-PART1_POST = "https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/"
-PART2_POST = "https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/"
+PART1_POST = "https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/"
+PART2_POST = "https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/"
 PART1_REPORT = ("https://wandb.ai/kettle-labs/rxnorm-vandf/reports/"
                 "VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA")
 LEVERS_TITLE = "VANDF → RxNorm, Part II: a second source vocabulary, a strength head, and cross-validation by ingredient"

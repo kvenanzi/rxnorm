@@ -20,9 +20,9 @@ real drugs that have no clinical-drug concept, 46% at 98.2%.
 The full write-up, with hypotheses, the 18-run sweep, calibration, error
 analysis, and the experiment log, is [docs/post/README.md](docs/post/README.md),
 also published on the blog as
-[Mapping VA Drug Names to RxNorm Clinical Drugs with a Fine-Tuned Bi-Encoder](https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/).
+[Mapping VA Drug Names to RxNorm Clinical Drugs with a Fine-Tuned Bi-Encoder](https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/).
 The follow-up, [docs/post-2/README.md](docs/post-2/README.md), is
-[Three Interventions on a VA-to-RxNorm Drug-Name Mapper](https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/).
+[Three Interventions on a VA-to-RxNorm Drug-Name Mapper](https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/).
 
 ## Use the model
 
@@ -38,8 +38,8 @@ for p in mapper.map(["METOPROLOL TARTRATE 12.5MG TAB", "CATHETER,FOLEY SILICONE 
     print(p.rxcui, p.name, f"{p.confidence:.2f}", "accept" if p.accept else "review")
 ```
 
-Write-ups: [Part I](https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/) ·
-[Part II](https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/) ·
+Write-ups: [Part I](https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/) ·
+[Part II](https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/) ·
 Model: [kvenanzi/vandf-rxnorm-biencoder](https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder) ·
 Dataset: [kvenanzi/vandf-rxnorm-pairs](https://huggingface.co/datasets/kvenanzi/vandf-rxnorm-pairs) ·
 Runs: [wandb.ai/kettle-labs/rxnorm-vandf](https://wandb.ai/kettle-labs/rxnorm-vandf) ·
@@ -47,8 +47,8 @@ Report: [live panels](https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-Rx
 
 ## Documentation
 
-- [docs/post/README.md](docs/post/README.md): the write-up ([on the blog](https://kettlelabs.dev/blog/posts/vandf-rxnorm-biencoder/))
-- [docs/post-2/README.md](docs/post-2/README.md): the follow-up ([on the blog](https://kettlelabs.dev/blog/posts/vandf-rxnorm-interventions/))
+- [docs/post/README.md](docs/post/README.md): the write-up ([on the blog](https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/))
+- [docs/post-2/README.md](docs/post-2/README.md): the follow-up ([on the blog](https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/))
 - [docs/rxnorm-primer.md](docs/rxnorm-primer.md): the RxNorm data model this all rests on
 - [docs/training-primer.md](docs/training-primer.md): what `rxnorm_vandf/train.py` does and why
 - [docs/calibration-and-sweeps.md](docs/calibration-and-sweeps.md): confidence, abstention, and the sweep
