@@ -264,12 +264,12 @@ Cross-validation confirms the band of Part I by a second procedure, and answers 
 - **Artifacts:** `vandf-rxnorm-multi:v0` (the six draws with both sources) and `vandf-rxnorm-kfold:v0` (the folds) for the data; `vandf-rxnorm-predictions` per fold; `vandf-rxnorm-biencoder-final-all` for the all-data model (`v0` the weights as trained, `v1` the same weights with `calibration.json`), which is also on Hugging Face as [kvenanzi/vandf-rxnorm-biencoder-all](https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder-all). The published artifacts `vandf-rxnorm-pairs`, `vandf-rxnorm-splits`, and `vandf-rxnorm-biencoder` are unchanged.
 - **Compute:** 5.2 hours of A100 run time in total, excluding runtime start-up: 4.4 hours for the grid (2.4 minutes per VA-only run and 7.9 per SPL run, including 6 minutes spent in the runs that failed), 22 minutes for the four control runs, and 25 minutes for the seven folds and the all-data model (3.2 and 2.3 minutes per run).
 - **Outputs:** `outputs/levers/levers.md` (`13_levers.py summarize`, which merges the five grid sweeps and the two controls), `outputs/kfold/oof.md`, `outputs/kfold/calibration.md`, and `outputs/kfold/compare.md` (`14_kfold.py oof`, `calibrate-oof`, and `compare`), and the two figures (`11_figures.py --only levers --only kfold`). Fold runs `eiaktu3s`, `jobvjf5p`, `5btdesbn`, `aefstan3`, `70v08ec3`, `xkk4lioe`, and `3ppkzzgb`; all-data run `qwn31tzn`.
-- **Report:** the [W&B Report](https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-RxNorm-Part-II-a-second-source-vocabulary-a-strength-head-and-cross-validation-by-ingredient--VmlldzoxNzkzOTU4NQ) presents the runs with live panels: the grid by arm and draw, the controls beside the grid cells they are compared with, the fold models, and the head-weight pilot. Its tables are generated from the same outputs as §5 (`10_report.py --part 2`).
+- **Report:** the [W&B Report](https://wandb.ai/within-noise/rxnorm-vandf/reports/VANDF-RxNorm-Part-II-a-second-source-vocabulary-a-strength-head-and-cross-validation-by-ingredient--VmlldzoxNzkzOTU4NQ) presents the runs with live panels: the grid by arm and draw, the controls beside the grid cells they are compared with, the fold models, and the head-weight pilot. Its tables are generated from the same outputs as §5 (`10_report.py --part 2`).
 
 <!-- qmd
 ::: {.column-page-right}
 ```{=html}
-<iframe src="https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-RxNorm-Part-II-a-second-source-vocabulary-a-strength-head-and-cross-validation-by-ingredient--VmlldzoxNzkzOTU4NQ"
+<iframe src="https://wandb.ai/within-noise/rxnorm-vandf/reports/VANDF-RxNorm-Part-II-a-second-source-vocabulary-a-strength-head-and-cross-validation-by-ingredient--VmlldzoxNzkzOTU4NQ"
         title="W&B Report: VANDF to RxNorm, Part II: a second source vocabulary, a strength head, and cross-validation by ingredient"
         loading="lazy" style="border:none;width:100%;height:900px"></iframe>
 ```
