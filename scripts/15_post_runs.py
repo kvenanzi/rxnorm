@@ -81,8 +81,24 @@ def layout(fig, height, **kw):
                       font=FONT, height=height, **kw)
 
 
-def save(fig, path):
-    fig.write_html(path, include_plotlyjs="cdn", full_html=True,
+# On a phone-width page the legend moves below the plot, away from the metric menu.
+NARROW = {"legend.y": -0.28, "legend.yanchor": "top", "legend.x": 0, "legend.xanchor": "left",
+          "margin.l": 55, "margin.r": 10, "margin.b": 150, "xaxis.tickangle": -90}
+
+
+def save(fig, path, narrow=None):
+    """Write a standalone page. `narrow` adds layout changes for widths under 600 px."""
+    small, wide = NARROW | (narrow or {}), {}
+    for k in small:   # the wide values to restore, read from the figure as built
+        obj = fig.layout
+        for part in k.split("."):
+            obj = getattr(obj, part, None) if obj is not None else None
+        wide[k] = obj
+    script = (f"var gd=document.getElementById('{{plot_id}}');var S={json.dumps(small)},"
+              f"W={json.dumps(wide, default=lambda v: v.to_plotly_json())};"
+              "function fit(){Plotly.relayout(gd,window.innerWidth<600?S:W);}"
+              "fit();window.addEventListener('resize',fit);")
+    fig.write_html(path, include_plotlyjs="cdn", full_html=True, post_script=script,
                    config={"displaylogo": False, "responsive": True,
                            "modeBarButtonsToRemove": ["select2d", "lasso2d"]})
     # Shown in an iframe on the blog: no body margin, and the figures' surface colour.
@@ -127,7 +143,7 @@ def sweep_parallel(rows):
         line=dict(color=val, colorscale=[[0, "#a9c8ee"], [1, "#123f80"]], showscale=True,
                   colorbar=dict(title="validation<br>acc@1", thickness=12, tickformat=".2f"))))
     layout(fig, 460, margin=dict(l=150, r=40, t=50, b=30))
-    save(fig, OUT1 / "sweep_parallel.html")
+    save(fig, OUT1 / "sweep_parallel.html", {"margin.l": 120, "margin.b": 30, "margin.r": 20})
 
 
 def sweep_epochs(rows):
@@ -166,7 +182,9 @@ def sweep_epochs(rows):
                                   "dotted = none; thick = normalizer on",
                              xref="paper", yref="paper", x=0, y=-0.2, showarrow=False,
                              font=dict(size=12, color=INK2), xanchor="left")])
-    save(fig, OUT1 / "sweep_epochs.html")
+    save(fig, OUT1 / "sweep_epochs.html", {"annotations[0].y": -0.62, "annotations[0].text": "solid = ingredient negatives, "
+         "dashed = TF-IDF,<br>dotted = none; thick = normalizer on", "legend.y": -0.25,
+         "margin.b": 210, "xaxis.tickangle": 0})
 
 
 def levers_cells(levers: Path):
@@ -202,7 +220,9 @@ def levers_cells(levers: Path):
                              tickvals=list(range(len(units))),
                              ticktext=[u.replace("/s", "<br>s") for u in units]),
            yaxis=axis | dict(title=metrics[0][1], showgrid=True))
-    save(fig, OUT2 / "levers_cells.html")
+    save(fig, OUT2 / "levers_cells.html",
+         {"xaxis.ticktext": [u.replace("/", " ") for u in units], "margin.b": 190,
+          "legend.y": -0.45})
 
 
 def main():
