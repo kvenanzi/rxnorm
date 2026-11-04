@@ -2,7 +2,7 @@
 
 | created | modified | status | confidence | importance |
 |---|---|---|---|---|
-| 2026-09-14 | 2026-09-25 | finished | likely[^conf] | 3 |
+| 2026-09-14 | 2026-11-04 | finished | likely[^conf] | 3 |
 
 > **Abstract.** The [first report](https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/) (hereafter Part I) fine-tuned a small bi-encoder to map VA National Drug File (VANDF) names to RxNorm clinical drugs and, by re-drawing the ingredient-level split five additional times, estimated its accuracy on unseen ingredients at 0.907 ± 0.019, against 0.931 on the published draw. Its concluding section listed interventions expected to change that figure. This report evaluates three of them under the same design: every arm is trained on each of the same six ingredient draws and two training seeds, and an effect is credited only if it exceeds the split-to-split spread of about two points rather than the value on a single favourable draw. The interventions are (1) a second source vocabulary from the same RxNorm release, the FDA Structured Product Label names (MTHSPL), which is the only large source at UMLS restriction level 0 other than the two already used, and which contributes 48,985 labelled pairs whose surface form differs substantially from the VA's; (2) an auxiliary classification head, trained jointly and discarded at inference, that predicts the target's strength from the query embedding ([Caruana 1997](#references)), directed at the error category shared by every earlier model; and (3) seven-fold cross-validation by ingredient ([Stone 1974](#references)), which yields a single out-of-fold estimate over every held-out string, a final model trained on every ingredient family, and a test of whether abstention thresholds chosen on one set of folds transfer to another. A pilot on the published split found that the head's loss is approximately fifty times the contrastive loss at initialization and that every weight above 0.01 lowers validation accuracy monotonically; the factorial grid therefore runs the head at 0.01. Neither training intervention changes accuracy on VA strings. Over twelve paired (draw, seed) units, the SPL strings change VA test acc@1 by −0.0003 (95% CI −0.006 to +0.005; 6 of 12 units positive) and the head by −0.0013 (−0.003 to 0.000; 1 of 12), and the head leaves unchanged the strength accuracy it was designed to raise. The SPL strings do raise accuracy on held-out SPL strings, from 0.709 to 0.833 (+0.123; 12 of 12), and a control capped at 9,300 SPL rows retains all of that increase on the two draws on which it was run. Seven-fold cross-validation of the VA-only recipe gives a pooled out-of-fold acc@1 of 0.894 (Wilson 95% 0.889–0.899, n = 12,227), within the six-draw band, and a 99%-precision threshold chosen on six folds achieves between 0.986 and 0.998 on the seventh. The grid also revises one estimate of Part I: on the A100 the training seed contributes a standard deviation of 0.0045 in test acc@1, not 0.001, so the split contributes about four times the seed's standard deviation rather than twenty.
 
@@ -159,6 +159,17 @@ Each main effect is the mean of its two simple contrasts within a unit (§4.1), 
 
 *Figure 1. Test acc@1 (left) and test strength accuracy (centre) for the four arms on each (draw, seed) unit, and the three paired effects on test acc@1 with their 95% intervals (right; the small markers are the twelve per-unit values). Data: `figures/data.json`; runs in sweeps `nypttmi8`, `ad9nakej`, `2v3am5xr`, `94onbtb5`, and `zcsece1l`.*
 
+<!-- qmd
+::: {.column-page-right}
+```{=html}
+<iframe src="figures/levers_cells.html" title="Every cell of the grid, by arm and unit"
+        loading="lazy" style="border:none;width:100%;height:520px"></iframe>
+```
+:::
+-->
+
+The interactive chart [`figures/levers_cells.html`](figures/levers_cells.html) shows the same 48 cells with a menu that switches between VA test acc@1, test strength accuracy, acc@1 on the held-out SPL strings, validation acc@1, and test recall@5; hovering over a point gives its run and the epoch selected on validation.
+
 **The SPL strings.** Their effect on VA test accuracy is indistinguishable from zero: the 95% interval, −0.006 to +0.005, excludes the one-point increase that H1 predicted. On validation, the quantity on which selection is made, the effect is +0.0020 with 9 of 12 units positive and an interval that includes zero. The per-unit contrast has a standard deviation of 0.0082 over the twelve units, larger than the 0.0064 that the seed variation estimated below would produce for a difference of two runs; its sign agrees between the two seeds on four of the six draws, and its mean per draw ranges from −0.010 (v5) to +0.010 (v6). The additional strings therefore shift VA test accuracy on individual draws by up to one point in either direction, and the shifts average to zero across draws.
 
 **The strength head.** The head leaves strength accuracy unchanged (−0.0001, 5 of 12) and lowers acc@1: by 0.0013 on test (1 of 12 units positive; the interval's upper end is −0.00002) and by 0.0020 on validation (0 of 12; t = −5.7). Ingredient accuracy falls by 0.0008 (3 of 12) and dose-form accuracy does not change. The decrease on validation, 0.0020, is a ninth of the split standard deviation (0.018) and less than half the seed standard deviation (0.0043), and it is resolved only because the two arms of a unit share the seed and therefore the batches, which reduces the standard deviation of the paired contrast to 0.0012 on validation. The monotone response of the pilot (§4.2) thus extends to the smallest weight tested: at 0.01 the head does not improve the quantity it predicts and lowers validation accuracy by 0.2 points.
@@ -273,20 +284,10 @@ Cross-validation confirms the band of Part I by a second procedure, and answers 
 
 - **Code:** the same repository as Part I; the commands are listed in its README under "The follow-up". Nothing Part I depends on has changed: its data folder, scripts, figures, and numbers are reproduced by the same commands, and the default dataset build emits byte-identical SQL. Every new behaviour is controlled by a new flag or a new configuration field with a default.
 - **Runs:** sweeps `nypttmi8` (the grid), `ad9nakej`, `2v3am5xr`, `94onbtb5`, and `zcsece1l` (cells re-run after the failures recorded in Appendix A), `2exoct4h` and `ocmpf5na` (the controls); W&B group `kfold-k7` for the folds and the final model; group `levers-pilot` for §4.2.
-- **Artifacts:** `vandf-rxnorm-multi:v0` (the six draws with both sources) and `vandf-rxnorm-kfold:v0` (the folds) for the data; `vandf-rxnorm-predictions` per fold; `vandf-rxnorm-biencoder-final-all` for the all-data model (`v0` the weights as trained, `v1` the same weights with `calibration.json`), which is also on Hugging Face as [kvenanzi/vandf-rxnorm-biencoder-all](https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder-all). The published artifacts `vandf-rxnorm-pairs`, `vandf-rxnorm-splits`, and `vandf-rxnorm-biencoder` are unchanged.
+- **Artifacts:** these were stored in Weights & Biases and are no longer public, except the all-data model. They were `vandf-rxnorm-multi:v0` (the six draws with both sources) and `vandf-rxnorm-kfold:v0` (the folds) for the data; `vandf-rxnorm-predictions` per fold; `vandf-rxnorm-biencoder-final-all` for the all-data model (`v0` the weights as trained, `v1` the same weights with `calibration.json`), which is also on Hugging Face as [kvenanzi/vandf-rxnorm-biencoder-all](https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder-all). The published artifacts `vandf-rxnorm-pairs`, `vandf-rxnorm-splits`, and `vandf-rxnorm-biencoder` are unchanged.
 - **Compute:** 5.2 hours of A100 run time in total, excluding runtime start-up: 4.4 hours for the grid (2.4 minutes per VA-only run and 7.9 per SPL run, including 6 minutes spent in the runs that failed), 22 minutes for the four control runs, and 25 minutes for the seven folds and the all-data model (3.2 and 2.3 minutes per run).
 - **Outputs:** `outputs/levers/levers.md` (`13_levers.py summarize`, which merges the five grid sweeps and the two controls), `outputs/kfold/oof.md`, `outputs/kfold/calibration.md`, and `outputs/kfold/compare.md` (`14_kfold.py oof`, `calibrate-oof`, and `compare`), and the two figures (`11_figures.py --only levers --only kfold`). Fold runs `eiaktu3s`, `jobvjf5p`, `5btdesbn`, `aefstan3`, `70v08ec3`, `xkk4lioe`, and `3ppkzzgb`; all-data run `qwn31tzn`.
-- **Report:** the [W&B Report](https://wandb.ai/within-noise/rxnorm-vandf/reports/VANDF-RxNorm-Part-II-a-second-source-vocabulary-a-strength-head-and-cross-validation-by-ingredient--VmlldzoxNzkzOTU4NQ) presents the runs with live panels: the grid by arm and draw, the controls beside the grid cells they are compared with, the fold models, and the head-weight pilot. Its tables are generated from the same outputs as §5 (`10_report.py --part 2`).
-
-<!-- qmd
-::: {.column-page-right}
-```{=html}
-<iframe src="https://wandb.ai/within-noise/rxnorm-vandf/reports/VANDF-RxNorm-Part-II-a-second-source-vocabulary-a-strength-head-and-cross-validation-by-ingredient--VmlldzoxNzkzOTU4NQ"
-        title="W&B Report: VANDF to RxNorm, Part II: a second source vocabulary, a strength head, and cross-validation by ingredient"
-        loading="lazy" style="border:none;width:100%;height:900px"></iframe>
-```
-:::
--->
+- **Run records:** [`figures/runs.json`](figures/runs.json) lists the 89 runs of this report with their configuration and final metrics: the head-weight pilot, the grid and its re-runs, the controls, the folds, and the all-data model. The runs were tracked in Weights & Biases (project `within-noise/rxnorm-vandf`), and these records were exported from it on 2026-11-04.
 
 ## Appendix A: Experiment log
 

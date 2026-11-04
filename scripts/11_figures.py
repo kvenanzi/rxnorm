@@ -1,4 +1,4 @@
-"""Figures for the write-up, from W&B run data and local models.
+"""Figures for the write-up, from W&B run data (the local export when present) and local models.
 
 Writes docs/post/figures/*.png and figures/data.json (the numbers behind each).
 Run from the repo root:  uv run scripts/11_figures.py
@@ -16,7 +16,8 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from rxnorm_vandf.wb import STORY_RUNS, SWEEP_ID, api, latest_calibrate_run, line_series, run
+from rxnorm_vandf.wb import (ENTITY, PROJECT, STORY_RUNS, SWEEP_ID, api, latest_calibrate_run,
+                             line_series, run)
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "post" / "figures"
@@ -66,7 +67,7 @@ def fig_progression(summaries: dict) -> dict:
 
 
 def fig_sweep_effects() -> dict:
-    sweep = api().sweep(f"kettle-labs/rxnorm-vandf/{SWEEP_ID}")
+    sweep = api().sweep(f"{ENTITY}/{PROJECT}/{SWEEP_ID}")
     rows = [(r.config["base_model"].split("/")[-1], r.config["negatives"],
              r.config["normalize_strength"], r.summary["val/acc@1"]) for r in sweep.runs]
     factors = {

@@ -42,8 +42,7 @@ Write-ups: [Part I](https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/) 
 [Part II](https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/) ·
 Model: [kvenanzi/vandf-rxnorm-biencoder](https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder) ·
 Dataset: [kvenanzi/vandf-rxnorm-pairs](https://huggingface.co/datasets/kvenanzi/vandf-rxnorm-pairs) ·
-Runs: [wandb.ai/kettle-labs/rxnorm-vandf](https://wandb.ai/kettle-labs/rxnorm-vandf) ·
-Report: [live panels](https://wandb.ai/kettle-labs/rxnorm-vandf/reports/VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA)
+Run records: [Part I](docs/post/figures/runs.json) · [Part II](docs/post-2/figures/runs.json)
 
 ## Documentation
 

@@ -2,7 +2,7 @@
 
 | created | modified | status | confidence | importance |
 |---|---|---|---|---|
-| 2026-09-11 | 2026-09-25 | finished | likely[^conf] | 4 |
+| 2026-09-11 | 2026-11-04 | finished | likely[^conf] | 4 |
 
 > **Abstract.** Medication normalization tools reliably map a raw drug string to its RxNorm *ingredient* (RxMap, [Korpela et al 2026](#references), reports F1 ≈ 0.97), but the code a pharmacy or interaction checker needs is the *clinical drug*: ingredient, strength, and dose form resolved together. I ask how far a small retrieval model gets at that level, using a labeled dataset that costs nothing to build: the VA National Drug File (VANDF) is a source vocabulary inside RxNorm, so every VA name that shares a concept identifier with an RxNorm clinical drug is, by NLM's own curation, the same drug. From the 2026-09-08 release I extract 14,372 (VA string, SCD/SBD) pairs over 8,315 targets and a 27,287-candidate pool, split *by ingredient* so the test set contains only drugs whose ingredients were never seen in training. Exact string match scores 0; TF-IDF character n-grams reach acc@1 0.509; a MiniLM bi-encoder fine-tuned with a contrastive loss and ingredient-matched hard negatives reaches 0.836; a 40-line rule that pre-computes RxNorm-style concentrations adds 5 points (0.886); and an 18-run grid shows domain pre-training (SapBERT) is worth a further +8.6 points of validation accuracy, more than either of the other factors; a second 18-run sweep re-checks the smallest factor on six ingredient draws, and ingredient-matched hard negatives beat in-batch-only on every one of them (+1.6 points test acc@1, 95% CI 0.8–2.4). The final model scores **acc@1 0.931 (95% CI 0.918–0.941), recall@5 0.984** on the published test split; re-drawing the ingredient split five more times and retraining puts the same recipe at **0.907 ± 0.019** (range 0.874–0.931), with the published draw the most favorable of the six and a training-seed standard deviation of 0.0045 (measured in [Part II](https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/) over twelve draw-and-seed pairs; the three seeds run here gave 0.001). Because a 7% error rate is not deployable without review, I calibrate a confidence score and choose thresholds on validation only: 79% of answerable strings can be auto-accepted at 98.8% precision, or 46% at 98.2% once real drugs with no clinical-drug concept are included. Remaining errors split evenly across strength, dose form, ingredient, and brand-versus-generic twins, and a share of the strength errors are underdetermined by the input string. Limitations: VA strings only; a headline that should be read as a band of about two points rather than a point estimate, because the ingredient draw moves it by two to three times the sampling error; and calibration thresholds fit on one split. Code, data, model, and every run are public.
 
@@ -169,7 +169,7 @@ Exact match is zero: not one of 14,372 VA strings equals its RxNorm name after l
 
 ### 5.2 First fine-tune: MiniLM with ingredient-matched negatives (H3)
 
-Run `all-minilm-l6-v2-ingredient` ([W&B](https://wandb.ai/within-noise/rxnorm-vandf/runs/fked1jx1)), local GTX 1070, 4 epochs × 145 steps, 4.8 minutes. 123 of the 9,287 training rows fell back to a TF-IDF negative because their ingredient had only one product.
+Run `all-minilm-l6-v2-ingredient` (`fked1jx1`), local GTX 1070, 4 epochs × 145 steps, 4.8 minutes. 123 of the 9,287 training rows fell back to a TF-IDF negative because their ingredient had only one product.
 
 | | test acc@1 | recall@5 | ingredient | strength | dose form | val acc@1 |
 |---|---|---|---|---|---|---|
@@ -189,7 +189,7 @@ Converting a percentage to milligrams per millilitre is arithmetic. An embedding
 
 ### 5.3 The strength normalizer (H4)
 
-Run `all-minilm-l6-v2-ingredient-strength` ([W&B](https://wandb.ai/within-noise/rxnorm-vandf/runs/x9p04t9i)): same model, seed, and data, one flag.
+Run `all-minilm-l6-v2-ingredient-strength` (`x9p04t9i`): same model, seed, and data, one flag.
 
 | | test acc@1 | recall@5 | ingredient | strength | dose form | val acc@1 |
 |---|---|---|---|---|---|---|
@@ -204,7 +204,7 @@ Run `all-minilm-l6-v2-ingredient-strength` ([W&B](https://wandb.ai/within-noise/
 
 ### 5.4 The sweep (H5)
 
-Sweep `idhaaw5i` ([W&B](https://wandb.ai/within-noise/rxnorm-vandf/sweeps/idhaaw5i)), 18 runs, Colab A100, about 30 minutes in total. Sorted by the selection metric.
+Sweep `idhaaw5i`, 18 runs, Colab A100, about 30 minutes in total. Sorted by the selection metric.
 
 | Encoder | Negatives | Normalizer | val acc@1 | test acc@1 | test recall@5 | test strength acc |
 |---|---|---|---|---|---|---|
@@ -239,11 +239,31 @@ Mean validation acc@1 by factor level:
 
 *Figure 2. Mean validation acc@1 per factor level across the 18-run grid. Data: `figures/data.json`.*
 
+<!-- qmd
+::: {.column-page-right}
+```{=html}
+<iframe src="figures/sweep_parallel.html" title="The 18 sweep runs, parallel coordinates"
+        loading="lazy" style="border:none;width:100%;height:480px"></iframe>
+```
+:::
+-->
+
+<!-- qmd
+::: {.column-page-right}
+```{=html}
+<iframe src="figures/sweep_epochs.html" title="Validation metrics by epoch for each sweep run"
+        loading="lazy" style="border:none;width:100%;height:540px"></iframe>
+```
+:::
+-->
+
+Two interactive charts show the eighteen runs one by one, where Figure 2 shows means. [`figures/sweep_parallel.html`](figures/sweep_parallel.html) draws each run as a line from its encoder, hard-negative strategy, and normalizer setting to its validation and test acc@1; dragging along an axis selects a range and highlights the runs in it. [`figures/sweep_epochs.html`](figures/sweep_epochs.html) plots each run's validation metrics after every epoch, with a menu to choose the metric.
+
 The effects are roughly additive, and the best cell is best on every axis, so there is no interesting interaction to report. On H5: the encoder dominates, and the direction is instructive. `bge-small` is newer and scores higher than MiniLM on general retrieval benchmarks, yet the two are indistinguishable here; SapBERT, which is older and not a general-purpose embedder at all, wins by a wide margin because its pre-training objective (UMLS synonym alignment) is almost this task. Two cautions. Each cell is one seed on one split. The training seed moves test acc@1 with a standard deviation of about 0.0045 ([Part II](https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/) §5.1; the three seeds of §5.8 gave 0.001, and the ±0.5 point in §5.2 was the GPU and library stack), and the split moves it by about 0.02 between draws; the encoder and normalizer effects lie well outside both, and the +3.0 negatives effect does not, which is why §5.9 re-runs it on every split. And the normalizer's contribution shrinks with SapBERT (+4.0 on its best cell vs +5.6 for MiniLM), consistent with a stronger encoder having absorbed some of the conversions.
 
 ### 5.5 Final model
 
-The winning configuration retrained locally with an artifact (run `sapbert-ingredient-strength-final`, [W&B](https://wandb.ai/within-noise/rxnorm-vandf/runs/0d9ntjls); 19.5 minutes on the GTX 1070; artifact `vandf-rxnorm-biencoder:v3`). Validation 0.883 / 0.961 against the sweep cell's 0.886, within noise.
+The winning configuration retrained locally with an artifact (run `sapbert-ingredient-strength-final`, `0d9ntjls`; 19.5 minutes on the GTX 1070; artifact `vandf-rxnorm-biencoder:v3`). Validation 0.883 / 0.961 against the sweep cell's 0.886, within noise.
 
 | | acc@1 | 95% CI | recall@5 | ingredient | strength | dose form |
 |---|---|---|---|---|---|---|
@@ -327,7 +347,7 @@ The sweep's factor effects (§5.4) were measured on v1 only. The encoder (+8.6) 
 
 ### 5.9 Hard negatives across splits
 
-Sweep `uukeyzw7` ([W&B](https://wandb.ai/within-noise/rxnorm-vandf/sweeps/uukeyzw7)): SapBERT with the normalizer on, the three hard-negative strategies, on each of the six splits, 18 runs on one Colab A100 in about 35 minutes. The three v1 cells reproduced the original sweep's v1 cells to four decimals (0.9275 / 0.9232 / 0.9096 test), which says two things: the pipeline is unchanged, and Colab's stack reproduces a run at the same seed on the same GPU type (to four decimals here, and to within 0.0005 in three later repeats reported in [Part II](https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/), Appendix A), so the half-point difference in §5.2 was the 1070 against the A100.
+Sweep `uukeyzw7`: SapBERT with the normalizer on, the three hard-negative strategies, on each of the six splits, 18 runs on one Colab A100 in about 35 minutes. The three v1 cells reproduced the original sweep's v1 cells to four decimals (0.9275 / 0.9232 / 0.9096 test), which says two things: the pipeline is unchanged, and Colab's stack reproduces a run at the same seed on the same GPU type (to four decimals here, and to within 0.0005 in three later repeats reported in [Part II](https://withinnoise.dev/blog/posts/vandf-rxnorm-interventions/), Appendix A), so the half-point difference in §5.2 was the 1070 against the A100.
 
 | Split | ingredient, test (val) | tfidf, test (val) | none, test (val) | ingredient − none, test | ingredient − none, val |
 |---|---|---|---|---|---|
@@ -399,21 +419,11 @@ Items 1, 3, and 4 are evaluated in a follow-up report, [Part II](https://withinn
 - **Code and data preparation:** [github.com/kvenanzi/rxnorm](https://github.com/kvenanzi/rxnorm). Twelve numbered scripts take the RxNorm release to a trained, calibrated, published model and the split-variance runs; primers cover the [RxNorm data model](../rxnorm-primer.md), [training](../training-primer.md), and [calibration and sweeps](../calibration-and-sweeps.md).
 - **Model:** [kvenanzi/vandf-rxnorm-biencoder](https://huggingface.co/kvenanzi/vandf-rxnorm-biencoder), with the calibration layer (four numbers in `calibration.json`, no pickle) and the candidate pool. `Mapper.from_pretrained(...)` gives string in, RXCUI and confidence out.
 - **Dataset:** [kvenanzi/vandf-rxnorm-pairs](https://huggingface.co/datasets/kvenanzi/vandf-rxnorm-pairs). Derived only from the two unrestricted RxNorm sources; no UTS account is needed to reproduce the numbers.
-- **Every run:** the W&B project [within-noise/rxnorm-vandf](https://wandb.ai/within-noise/rxnorm-vandf) holds the story runs, the sweep, and the calibration runs. The [W&B Report](https://wandb.ai/within-noise/rxnorm-vandf/reports/VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA) presents them with live panels: run comparison, validation accuracy by epoch, the sweep's parallel coordinates, and the precision-versus-coverage curves.
-
-<!-- qmd
-::: {.column-page-right}
-```{=html}
-<iframe src="https://wandb.ai/within-noise/rxnorm-vandf/reports/VANDF-RxNorm-how-far-a-small-model-gets-at-the-clinical-drug-level--VmlldzoxNzkxNzIzNA"
-        title="W&B Report: VANDF to RxNorm, how far a small model gets at the clinical-drug level"
-        loading="lazy" style="border:none;width:100%;height:900px"></iframe>
-```
-:::
--->
+- **Every run:** [`figures/runs.json`](figures/runs.json) lists the 57 runs of this report with their configuration and final metrics: the baselines, the story runs, both sweeps, the final model, the calibration runs, and the split-variance runs. The runs were tracked in Weights & Biases (project `within-noise/rxnorm-vandf`), and these records were exported from it on 2026-11-04. Every plotted number is in `figures/data.json`, and `11_figures.py` regenerates the figures from the local export of the project.
 
 ## Appendix A: Experiment log
 
-All work was done 2026-09-11 against the 2026-09-08 release, in the order below, except the split-variance runs of 2026-09-14. Run identifiers are W&B run IDs in `within-noise/rxnorm-vandf`.
+All work was done 2026-09-11 against the 2026-09-08 release, in the order below, except the split-variance runs of 2026-09-14. Run identifiers are the W&B run IDs listed in `figures/runs.json`.
 
 - **Load.** Four RRF tables into DuckDB with row counts matching file line counts. Two parsing gotchas: `TRAILING` is a reserved word (the trailing-pipe column is `TRAILING_PIPE`), and both `quote=''` and `escape=''` are required or quote characters in drug names break the parse.
 - **Checkpoint.** 53,195 active VANDF atoms; 17,964 land on an SCD/SBD; 8,315 distinct targets; 27,287 active SCD/SBD in RxNorm. By term type: CD → 8,458 SCD + 313 SBD; AB → 8,333 SCD + 297 SBD. About half of CD/AB atoms have no SCD/SBD.

@@ -1,12 +1,18 @@
-"""Read things back out of Weights & Biases for reports and figures."""
+"""Read things back out of Weights & Biases for reports and figures.
+
+When the local W&B export exists (wandb-export/rxnorm-vandf/, written by wandb_export.py, or the
+folder named by WANDB_EXPORT), `run`, `api().sweep`, `api().runs`, and `line_series` read from it
+instead of the W&B API, so the figures need no W&B account. Scripts that create W&B reports or
+query other W&B features still need the API.
+"""
 
 import json
+import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
-import wandb
-
-ENTITY = "kettle-labs"
+ENTITY = "within-noise"
 PROJECT = "rxnorm-vandf"
 
 # The runs the write-up is built from, in story order.
@@ -43,7 +49,55 @@ SPLIT_SEED_RUNS: dict[str, str] = {
 }
 
 
-def api() -> wandb.Api:
+EXPORT = Path(os.environ.get("WANDB_EXPORT",
+                             Path(__file__).resolve().parent.parent / "wandb-export" / PROJECT))
+
+
+class _LocalArtifact(SimpleNamespace):
+    def download(self) -> str:
+        return str(EXPORT / self.path)
+
+
+class _LocalRun:
+    """The parts of wandb.apis.public.Run the figure and summary scripts use."""
+
+    def __init__(self, run_id: str):
+        d = json.loads((EXPORT / "runs" / run_id / "run.json").read_text())
+        self.id, self.name, self.state, self.created_at = d["id"], d["name"], d["state"], d["created_at"]
+        self.job_type, self.group, self.tags = d["job_type"], d["group"], d["tags"]
+        self.config = {k: (v["value"] if isinstance(v, dict) and "value" in v else v)
+                       for k, v in d["config"].items()}
+        self.summary = d["summary"]
+
+    def logged_artifacts(self):
+        # Run tables are named run-<run id>-<key>; other artifacts are not needed here.
+        return [_LocalArtifact(**a) for a in _artifacts()
+                if a["type"] == "run_table" and a["name"].startswith(f"run-{self.id}-")]
+
+
+class _LocalApi:
+    def run(self, path: str):
+        return _LocalRun(path.split("/")[-1])
+
+    def sweep(self, path: str):
+        s = json.loads((EXPORT / "sweeps" / f"{path.split('/')[-1]}.json").read_text())
+        return SimpleNamespace(id=s["id"], name=s["name"], config=s["config"],
+                               runs=[_LocalRun(r) for r in s["runs"]])
+
+    def runs(self, path: str, filters: dict | None = None):
+        rows = json.loads((EXPORT / "runs.json").read_text())
+        job = (filters or {}).get("jobType")
+        return [_LocalRun(r["id"]) for r in rows if job is None or r["job_type"] == job]
+
+
+def _artifacts() -> list[dict]:
+    return json.loads((EXPORT / "artifacts.json").read_text())
+
+
+def api():
+    if (EXPORT / "runs.json").exists():
+        return _LocalApi()
+    import wandb
     return wandb.Api()
 
 

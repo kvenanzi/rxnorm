@@ -15,3 +15,6 @@ wandb/
 outputs/
 models/
 artifacts/
+
+# Local W&B export (wandb_export.py); not committed
+/wandb-export/
