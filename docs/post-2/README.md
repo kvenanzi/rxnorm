@@ -218,6 +218,17 @@ The seven fold models train the VA-only recipe (Appendix B), seed 42, with epoch
 
 *Figure 2. Test acc@1 of each fold model on its held-out fold, with the pooled out-of-fold estimate and its Wilson 95% interval (left; the numbers under each bar are the fold's test acc@1 and its number of test strings), and the precision achieved on each fold by thresholds chosen on the other six, at the 95% and 99% targets, on the +hard population (right). Data: `figures/data.json`; runs in W&B group `kfold-k7`.*
 
+<!-- qmd
+::: {.column-page-right}
+```{=html}
+<iframe src="figures/kfold_epochs.html" title="The seven fold models by epoch"
+        loading="lazy" style="border:none;width:100%;height:460px"></iframe>
+```
+:::
+-->
+
+The interactive chart [`figures/kfold_epochs.html`](figures/kfold_epochs.html) plots each fold model's validation acc@1 and strength accuracy after each of its four epochs and, from its menu, its training loss. The validation column of the table above comes from scoring the kept epoch again after training; for folds 3 and 6 that score differs by one string from the value logged during training.
+
 The fold 0 model trains on nearly the published training set (bucket 29 moves from validation to training) and is tested on the published test set; it scores 0.932, against the published 0.931. The pooled out-of-fold acc@1 is 0.894 (10,932 of 12,227; Wilson 95% 0.889–0.899), with recall@5 0.975. The test folds cover 85.1% of the 14,369 distinct VA strings; the remainder are combination drugs whose ingredients fall in different folds (§3.3).
 
 Across folds, test acc@1 is 0.894 ± 0.021, range 0.864–0.932. Binomial sampling at these sizes accounts for 0.007 of that standard deviation, which leaves 0.020 attributable to which ingredients are held out. The six-draw estimate of Part I, obtained from six different hashes rather than seven contiguous ranges of one hash, was 0.907 ± 0.019 with 0.018 attributable to the draw; the two procedures agree. They also agree that the published test set is the most favourable partition: 0.932 is the largest of the seven folds, as 0.931 was the largest of the six draws, 3.8 and 2.4 points above the respective means. The pooled estimate lies 0.013 below the six-draw mean, inside the band.

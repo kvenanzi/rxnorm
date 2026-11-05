@@ -176,7 +176,7 @@ Run `all-minilm-l6-v2-ingredient` (`fked1jx1`), local GTX 1070, 4 epochs × 145 
 | TF-IDF | 0.509 | 0.820 | 0.978 | 0.617 | 0.698 | 0.465 |
 | **MiniLM, fine-tuned** | **0.836** | **0.967** | 0.983 | 0.884 | 0.935 | 0.773 |
 
-Validation acc@1 by epoch: 0.734 → 0.772 → **0.774** → 0.772 (epoch 3 kept). Training loss fell from 1.9 to 0.14. Dose-form accuracy jumped from 70% to 94%: the model learned that `TAB,SA` means `Extended Release Oral Tablet` and `SOLN,IRRG` means `Irrigation Solution`. Strength went only from 62% to 88%, and strength now accounts for 62% of what remains (H3 confirmed on both counts). Of 303 test failures: 125 strength only, 63 strength and dose form, 47 dose form only, 37 wrong concept with all components right, 31 wrong ingredient.
+Validation acc@1 by epoch: 0.734 → 0.772 → **0.774** → 0.772 (epoch 3 kept). The training loss, logged as the mean over each ten steps, fell from 0.70 over the first ten steps to 0.066 over the last ten, and averaged 0.139 over the whole run. Dose-form accuracy jumped from 70% to 94%: the model learned that `TAB,SA` means `Extended Release Oral Tablet` and `SOLN,IRRG` means `Irrigation Solution`. Strength went only from 62% to 88%, and strength now accounts for 62% of what remains (H3 confirmed on both counts). Of 303 test failures: 125 strength only, 63 strength and dose form, 47 dose form only, 37 wrong concept with all components right, 31 wrong ingredient.
 
 The strength failures had a specific shape:
 
@@ -201,6 +201,26 @@ Run `all-minilm-l6-v2-ingredient-strength` (`x9p04t9i`): same model, seed, and d
 ![Progression from exact match to the final model](figures/progression.png)
 
 *Figure 1. Test acc@1 and recall@5 for each method, n = 1,848 held-out-ingredient strings. Data: `figures/data.json`.*
+
+<!-- qmd
+::: {.column-page-right}
+```{=html}
+<iframe src="figures/training_curves.html" title="Validation acc@1 by epoch and training loss, three fine-tuned models"
+        loading="lazy" style="border:none;width:100%;height:500px"></iframe>
+```
+:::
+-->
+
+<!-- qmd
+::: {.column-page-right}
+```{=html}
+<iframe src="figures/progression_coverage.html" title="Precision against the share of test strings accepted, TF-IDF to the final model"
+        loading="lazy" style="border:none;width:100%;height:500px"></iframe>
+```
+:::
+-->
+
+Two interactive charts show the runs behind Figure 1. [`figures/training_curves.html`](figures/training_curves.html) plots the validation acc@1 of the three fine-tuned models after each epoch and, from its menu, their training loss. [`figures/progression_coverage.html`](figures/progression_coverage.html) plots, for each model from TF-IDF to the final one, the precision of the accepted strings when only the most confident share of the 1,848 test strings is accepted, using either the model's top-1 score or the margin between its top two candidates as the confidence. Both signals are uncalibrated; §5.6 and Figure 3 compare the calibrated signals of the final model.
 
 ### 5.4 The sweep (H5)
 
