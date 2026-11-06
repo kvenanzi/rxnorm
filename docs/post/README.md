@@ -431,7 +431,7 @@ With six pairs, six of six is the only sign count that reaches p < 0.05. The +3.
 
 I chose the question, set the rules, and edited the text. Claude Code wrote the code, ran the analysis, found the references, and drafted the post.
 
-I have not read the cited papers myself. Claude checked each citation against its source: against the full text where an open copy existed, and against excerpts of the full text for Nelson et al 2011. Sentences the sources did not fully support were narrowed or removed.
+Claude checked each citation against its source: against the full text where an open copy existed, and against excerpts of the full text for Nelson et al 2011.
 
 ## References
 

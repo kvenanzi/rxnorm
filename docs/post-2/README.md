@@ -346,7 +346,7 @@ The next steps I would try:
 
 I chose the question, set the rules, and edited the text. Claude Code wrote the code, ran the analysis, found the references, and drafted the post.
 
-I have not read the cited papers myself. Claude checked each citation against its source: against the full text where an open copy existed, and against the abstract for Caruana 1997 and Nadeau & Bengio 2003 (for the second, also the full text of its 1999 conference version). Sentences the sources did not fully support were narrowed or removed.
+Claude checked each citation against its source: against the full text where an open copy existed, and against the abstract for Caruana 1997 and Nadeau & Bengio 2003 (for the second, also the full text of its 1999 conference version).
 
 ## References
 
