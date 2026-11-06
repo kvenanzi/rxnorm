@@ -8,7 +8,6 @@ description: "Two training interventions and cross-validation by ingredient, eac
 
 *Three changes to the model from Part I, each tested on the same six divisions of the data and judged against the two-point spread that the choice of test drugs alone produces.*
 
-*Kevin Venanzi · first published 14 September 2026 · rewritten 6 November 2026*
 
 In [Part I](https://withinnoise.dev/blog/posts/vandf-rxnorm-biencoder/) I trained a small model that matches drug names from the VA National Drug File, such as `PAROXETINE HCL 40MG TAB`, to the complete-product entries of RxNorm, the national drug vocabulary, such as `paroxetine hydrochloride 40 MG Oral Tablet`. On drugs whose ingredients it had never seen in training, it picked the correct product about 91% of the time, and that figure moved by about two points depending only on which drugs were set aside for testing.
 

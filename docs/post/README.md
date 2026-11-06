@@ -8,7 +8,6 @@ description: "How far a small retrieval model gets at the clinical-drug level, w
 
 *Training a retrieval model on the links between VA drug names and RxNorm that the National Library of Medicine already maintains, and testing it on drugs whose ingredients it has never seen. Part I of two.*
 
-*Kevin Venanzi · first published 11 September 2026 · rewritten 6 November 2026*
 
 The problem I started from is this. A VA pharmacy records a drug under the VA's own name, such as `PAROXETINE HCL 40MG TAB`, while most other health systems and drug-interaction software use RxNorm, the National Library of Medicine's drug vocabulary, where the same product is `paroxetine hydrochloride 40 MG Oral Tablet`. Published tools already match names like these reliably to the active ingredient. A pharmacy needs the ingredient, the strength, and the form (tablet, solution, patch) together, which RxNorm calls a *clinical drug*.
 
