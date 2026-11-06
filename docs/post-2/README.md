@@ -347,7 +347,7 @@ The next steps I would try:
 
 I chose the question, set the rules, and edited the text. Claude Code wrote the code, ran the analysis, found the references, and drafted the post.
 
-I am not a pharmacist or a machine-learning researcher. The parts of this post that may look formal, such as writing the predictions down before running the tests and reporting every result including the ones that failed, are how I check work I could not have produced alone. I have not read the cited papers myself. Claude checked each citation against its source: against the full text where an open copy existed, and against the abstract for Caruana 1997 and Nadeau & Bengio 2003 (for the second, also the full text of its 1999 conference version). Sentences the sources did not fully support were narrowed or removed.
+I have not read the cited papers myself. Claude checked each citation against its source: against the full text where an open copy existed, and against the abstract for Caruana 1997 and Nadeau & Bengio 2003 (for the second, also the full text of its 1999 conference version). Sentences the sources did not fully support were narrowed or removed.
 
 ## References
 

@@ -432,7 +432,7 @@ With six pairs, six of six is the only sign count that reaches p < 0.05. The +3.
 
 I chose the question, set the rules, and edited the text. Claude Code wrote the code, ran the analysis, found the references, and drafted the post.
 
-I am not a pharmacist or a machine-learning researcher. The parts of this post that may look formal, such as choosing every setting on one group of drugs and testing once on another, are how I check work I could not have produced alone. I have not read the cited papers myself. Claude checked each citation against its source: against the full text where an open copy existed, and against excerpts of the full text for Nelson et al 2011. Sentences the sources did not fully support were narrowed or removed.
+I have not read the cited papers myself. Claude checked each citation against its source: against the full text where an open copy existed, and against excerpts of the full text for Nelson et al 2011. Sentences the sources did not fully support were narrowed or removed.
 
 ## References
 
